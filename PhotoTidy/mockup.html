@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Cleaner iOS Prototype</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['-apple-system', 'BlinkMacSystemFont', 'San Francisco', 'Helvetica Neue', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            start: '#6366f1', // Indigo 500
+                            end: '#8b5cf6',   // Violet 500
+                            light: '#e0e7ff',
+                        }
+                    },
+                    boxShadow: {
+                        'soft': '0 10px 40px -10px rgba(99, 102, 241, 0.15)',
+                        'card': '0 4px 20px -5px rgba(0, 0, 0, 0.05)',
+                        'float': '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Hide Scrollbar */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        
+        /* Smooth Transitions */
+        .page-transition {
+            transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.4s ease;
+        }
+
+        /* Card Stack Animation Classes */
+        .card-swipe-left {
+            transform: translateX(-150%) rotate(-20deg) !important;
+            opacity: 0 !important;
+        }
+        .card-swipe-right {
+            transform: translateX(150%) rotate(20deg) !important;
+            opacity: 0 !important;
+        }
+        
+        body {
+            background-color: #f3f4f6;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="relative w-[375px] h-[812px] bg-gray-50 rounded-[45px] border-[8px] border-gray-900 overflow-hidden shadow-2xl mx-auto select-none relative">
+        
+        <div id="app-container" class="w-full h-full relative">
+            
+            <div id="view-dashboard" class="absolute inset-0 w-full h-full flex flex-col p-6 pt-12 transition-all duration-300 z-10 bg-gray-50">
+                
+                <div class="flex justify-between items-end mb-8">
+                    <div>
+                        <p class="text-gray-400 text-sm font-medium mb-1">早上好</p>
+                        <h1 class="text-3xl font-bold text-gray-900 tracking-tight">相册清理</h1>
+                    </div>
+                    <div class="w-10 h-10 rounded-full bg-gray-200 overflow-hidden border-2 border-white shadow-sm">
+                        <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?ixlib=rb-1.2.1&auto=format&fit=crop&w=100&q=80" class="w-full h-full object-cover">
+                    </div>
+                </div>
+
+                <div class="w-full bg-gradient-to-br from-brand-start to-brand-end rounded-3xl p-6 text-white shadow-soft mb-8 relative overflow-hidden">
+                    <div class="absolute -top-10 -right-10 w-40 h-40 bg-white opacity-10 rounded-full blur-2xl"></div>
+                    
+                    <div class="relative z-10">
+                        <div class="flex justify-between items-center mb-4">
+                            <span class="text-indigo-100 text-sm font-medium">本机存储</span>
+                            <span class="text-white font-bold">186 GB / 256 GB</span>
+                        </div>
+                        <div class="w-full h-2 bg-black/20 rounded-full overflow-hidden mb-4">
+                            <div class="h-full w-[72%] bg-white rounded-full"></div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <div class="px-3 py-1 rounded-full bg-white/20 backdrop-blur-sm text-xs font-medium">
+                                可清理 ~4.2 GB
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <h2 class="text-lg font-bold text-gray-900 mb-4 tracking-tight">智能分析</h2>
+                <div class="grid grid-cols-2 gap-4 mb-20">
+                    <div onclick="navigateTo('cleaner')" class="bg-white p-5 rounded-3xl shadow-card active:scale-95 transition-transform cursor-pointer border border-gray-100 group">
+                        <div class="w-12 h-12 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-500 mb-4 group-hover:bg-indigo-100 transition-colors">
+                            <i class="fa-regular fa-clone text-xl"></i>
+                        </div>
+                        <h3 class="text-gray-900 font-bold text-base mb-1">相似照片</h3>
+                        <p class="text-gray-400 text-xs">发现 128 张</p>
+                    </div>
+
+                    <div class="bg-white p-5 rounded-3xl shadow-card active:scale-95 transition-transform cursor-pointer border border-gray-100 group">
+                        <div class="w-12 h-12 rounded-2xl bg-orange-50 flex items-center justify-center text-orange-400 mb-4 group-hover:bg-orange-100 transition-colors">
+                            <i class="fa-regular fa-eye-slash text-xl"></i>
+                        </div>
+                        <h3 class="text-gray-900 font-bold text-base mb-1">模糊照片</h3>
+                        <p class="text-gray-400 text-xs">发现 42 张</p>
+                    </div>
+
+                    <div class="bg-white p-5 rounded-3xl shadow-card active:scale-95 transition-transform cursor-pointer border border-gray-100 group">
+                        <div class="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-500 mb-4 group-hover:bg-blue-100 transition-colors">
+                            <i class="fa-regular fa-image text-xl"></i>
+                        </div>
+                        <h3 class="text-gray-900 font-bold text-base mb-1">截屏/文档</h3>
+                        <p class="text-gray-400 text-xs">发现 15 张</p>
+                    </div>
+
+                    <div class="bg-white p-5 rounded-3xl shadow-card active:scale-95 transition-transform cursor-pointer border border-gray-100 group">
+                        <div class="w-12 h-12 rounded-2xl bg-emerald-50 flex items-center justify-center text-emerald-500 mb-4 group-hover:bg-emerald-100 transition-colors">
+                            <i class="fa-solid fa-video text-xl"></i>
+                        </div>
+                        <h3 class="text-gray-900 font-bold text-base mb-1">大文件</h3>
+                        <p class="text-gray-400 text-xs">1.2 GB</p>
+                    </div>
+                </div>
+
+            </div>
+
+            <div id="view-cleaner" class="absolute inset-0 w-full h-full flex flex-col bg-white translate-x-full transition-transform duration-500 z-20">
+                
+                <div class="flex justify-between items-center p-6 pt-12">
+                    <button onclick="navigateTo('dashboard')" class="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center text-gray-900 active:bg-gray-200">
+                        <i class="fa-solid fa-chevron-left"></i>
+                    </button>
+                    <div class="flex flex-col items-center">
+                        <span class="text-gray-900 font-bold text-lg">相似照片</span>
+                        <span class="text-gray-400 text-xs tracking-wide">AI 智能识别中</span>
+                    </div>
+                    <button onclick="navigateTo('trash')" class="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center text-gray-900 active:bg-gray-200 relative">
+                        <i class="fa-regular fa-trash-can"></i>
+                        <div id="trash-badge" class="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[9px] text-white flex items-center justify-center hidden">0</div>
+                    </button>
+                </div>
+
+                <div class="flex-1 relative flex justify-center items-center px-6 overflow-hidden">
+                    
+                    <div class="absolute inset-0 flex flex-col items-center justify-center text-gray-300 z-0">
+                        <i class="fa-solid fa-check-circle text-6xl mb-4 text-gray-200"></i>
+                        <p>整理完成</p>
+                    </div>
+
+                    <div id="cards-container" class="relative w-full h-[480px]">
+                        </div>
+
+                    <div class="absolute bottom-6 left-0 right-0 text-center z-0 transition-opacity duration-200" id="photo-meta">
+                        <p class="text-gray-900 font-bold text-sm">IMG_3921.JPG</p>
+                        <p class="text-gray-400 text-xs mt-1">12.4 MB • 2023年10月12日</p>
+                    </div>
+                </div>
+
+                <div class="h-32 px-12 flex justify-between items-center pb-6">
+                    <button onclick="handleSwipe('left')" class="w-16 h-16 rounded-full border border-gray-200 text-red-500 text-2xl shadow-lg flex items-center justify-center active:bg-red-50 active:scale-95 transition-all">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                    
+                    <div class="flex flex-col items-center gap-1">
+                        <span class="text-[10px] text-gray-400 uppercase tracking-widest font-bold">Swipe</span>
+                        <div class="w-1 h-1 rounded-full bg-gray-300"></div>
+                    </div>
+
+                    <button onclick="handleSwipe('right')" class="w-16 h-16 rounded-full bg-gradient-to-r from-brand-start to-brand-end text-white text-2xl shadow-soft flex items-center justify-center active:scale-95 transition-all">
+                        <i class="fa-solid fa-check"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div id="view-trash" class="absolute inset-0 w-full h-full flex flex-col bg-gray-50 translate-y-full transition-transform duration-500 z-30">
+                 <div class="w-full flex justify-center pt-3 pb-1" onclick="navigateTo('cleaner')">
+                    <div class="w-12 h-1.5 bg-gray-300 rounded-full"></div>
+                </div>
+
+                <div class="px-6 py-4 flex justify-between items-center">
+                    <h2 class="text-2xl font-bold text-gray-900">待删除 <span class="text-gray-400 text-lg font-normal ml-2" id="trash-count-header">(0)</span></h2>
+                    <button onclick="navigateTo('cleaner')" class="text-sm font-medium text-gray-500">关闭</button>
+                </div>
+
+                <div class="flex-1 overflow-y-auto px-6 pb-24 no-scrollbar">
+                    <div id="trash-grid" class="grid grid-cols-3 gap-2">
+                        </div>
+                    <div id="trash-empty" class="flex flex-col items-center justify-center py-20 opacity-50">
+                        <i class="fa-regular fa-trash-can text-4xl mb-3 text-gray-400"></i>
+                        <p class="text-gray-400 text-sm">待删区是空的</p>
+                    </div>
+                </div>
+
+                <div class="absolute bottom-0 left-0 w-full bg-white border-t border-gray-100 p-6 pb-8 shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
+                    <div class="flex justify-between items-center mb-4 text-xs text-gray-500">
+                        <span>预计释放空间</span>
+                        <span class="font-bold text-gray-900 text-base" id="trash-size">0 MB</span>
+                    </div>
+                    <button class="w-full h-14 bg-gray-900 text-white font-bold rounded-2xl shadow-lg active:scale-[0.98] transition-transform flex items-center justify-center gap-2">
+                        <span>确认删除</span>
+                        <i class="fa-regular fa-trash-can"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div id="bottom-nav" class="absolute bottom-0 w-full h-24 bg-white/90 backdrop-blur-md border-t border-gray-100 flex justify-around items-start pt-4 z-10">
+                <button class="flex flex-col items-center gap-1 text-indigo-500">
+                    <i class="fa-solid fa-house text-xl"></i>
+                    <span class="text-[10px] font-medium">首页</span>
+                </button>
+                <button class="flex flex-col items-center gap-1 text-gray-400 hover:text-gray-600">
+                    <i class="fa-regular fa-images text-xl"></i>
+                    <span class="text-[10px] font-medium">相册</span>
+                </button>
+                <button class="flex flex-col items-center gap-1 text-gray-400 hover:text-gray-600">
+                    <i class="fa-solid fa-gear text-xl"></i>
+                    <span class="text-[10px] font-medium">设置</span>
+                </button>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // Mock Data for Photos
+        const mockPhotos = [
+            { id: 1, src: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=600&q=80', size: 3.2 },
+            { id: 2, src: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=600&q=80', size: 2.8 },
+            { id: 3, src: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=600&q=80', size: 4.1 },
+            { id: 4, src: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=600&q=80', size: 1.9 },
+            { id: 5, src: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=600&q=80', size: 5.0 }
+        ];
+
+        let currentIndex = 0;
+        let trashItems = [];
+
+        // DOM Elements
+        const views = {
+            dashboard: document.getElementById('view-dashboard'),
+            cleaner: document.getElementById('view-cleaner'),
+            trash: document.getElementById('view-trash')
+        };
+        const cardsContainer = document.getElementById('cards-container');
+        const trashGrid = document.getElementById('trash-grid');
+        const trashBadge = document.getElementById('trash-badge');
+        const trashCountHeader = document.getElementById('trash-count-header');
+        const trashSize = document.getElementById('trash-size');
+        const trashEmpty = document.getElementById('trash-empty');
+        const bottomNav = document.getElementById('bottom-nav');
+
+        // Initialize
+        renderCards();
+
+        // Navigation Logic
+        function navigateTo(viewName) {
+            if (viewName === 'cleaner') {
+                views.cleaner.classList.remove('translate-x-full');
+                bottomNav.classList.add('translate-y-full', 'opacity-0'); // Hide nav
+            } else if (viewName === 'dashboard') {
+                views.cleaner.classList.add('translate-x-full');
+                views.trash.classList.add('translate-y-full');
+                bottomNav.classList.remove('translate-y-full', 'opacity-0'); // Show nav
+            } else if (viewName === 'trash') {
+                views.trash.classList.remove('translate-y-full');
+                renderTrashGrid();
+            }
+        }
+
+        // Render Cards
+        function renderCards() {
+            cardsContainer.innerHTML = '';
+            // Render in reverse order so first item is on top in DOM (z-index naturally)
+            // But we actually want to render stack: current is last in DOM
+            
+            const stack = mockPhotos.slice(currentIndex).slice(0, 3).reverse();
+            
+            stack.forEach((photo, index) => {
+                const isTop = index === stack.length - 1;
+                const card = document.createElement('div');
+                
+                // Style for stacking effect
+                const scale = isTop ? 1 : 0.95 - ((stack.length - 1 - index) * 0.05);
+                const translateY = isTop ? 0 : 20 + ((stack.length - 1 - index) * 10);
+                const opacity = isTop ? 1 : 0.5;
+                const zIndex = index;
+
+                card.className = `absolute top-0 left-0 w-full h-full bg-white rounded-3xl shadow-float overflow-hidden transition-all duration-500 ease-out border border-gray-100`;
+                card.style.transform = `scale(${scale}) translateY(${translateY}px)`;
+                card.style.zIndex = zIndex;
+                card.style.opacity = opacity;
+                card.id = `card-${photo.id}`;
+
+                card.innerHTML = `
+                    <img src="${photo.src}" class="w-full h-full object-cover pointer-events-none">
+                    <div class="absolute top-4 left-4 bg-black/50 backdrop-blur-md px-3 py-1 rounded-full text-white text-xs font-medium">
+                        ${photo.size} MB
+                    </div>
+                `;
+                
+                cardsContainer.appendChild(card);
+            });
+
+            if (currentIndex >= mockPhotos.length) {
+                document.getElementById('photo-meta').style.opacity = '0';
+            } else {
+                document.getElementById('photo-meta').style.opacity = '1';
+            }
+        }
+
+        // Swipe Interaction Logic
+        function handleSwipe(direction) {
+            if (currentIndex >= mockPhotos.length) return;
+
+            const currentPhoto = mockPhotos[currentIndex];
+            const topCard = document.getElementById(`card-${currentPhoto.id}`);
+
+            if (direction === 'left') {
+                topCard.classList.add('card-swipe-left');
+                addToTrash(currentPhoto);
+            } else {
+                topCard.classList.add('card-swipe-right');
+            }
+
+            // Wait for animation then re-render
+            setTimeout(() => {
+                currentIndex++;
+                renderCards();
+            }, 300);
+        }
+
+        // Trash Management
+        function addToTrash(photo) {
+            if (!trashItems.find(i => i.id === photo.id)) {
+                trashItems.push(photo);
+                updateTrashStats();
+            }
+        }
+
+        function removeFromTrash(photoId) {
+            trashItems = trashItems.filter(i => i.id !== photoId);
+            updateTrashStats();
+            renderTrashGrid();
+        }
+
+        function updateTrashStats() {
+            const count = trashItems.length;
+            const size = trashItems.reduce((acc, curr) => acc + curr.size, 0).toFixed(1);
+
+            trashBadge.innerText = count;
+            trashBadge.classList.toggle('hidden', count === 0);
+            
+            trashCountHeader.innerText = `(${count})`;
+            trashSize.innerText = `${size} MB`;
+            
+            trashEmpty.classList.toggle('hidden', count > 0);
+        }
+
+        function renderTrashGrid() {
+            trashGrid.innerHTML = '';
+            trashItems.forEach(photo => {
+                const div = document.createElement('div');
+                div.className = 'relative aspect-square rounded-xl overflow-hidden bg-gray-200 group';
+                div.innerHTML = `
+                    <img src="${photo.src}" class="w-full h-full object-cover">
+                    <button onclick="removeFromTrash(${photo.id})" class="absolute top-1 right-1 w-6 h-6 bg-white/90 rounded-full text-gray-900 flex items-center justify-center shadow-sm opacity-0 group-hover:opacity-100 transition-opacity">
+                        <i class="fa-solid fa-rotate-left text-xs"></i>
+                    </button>
+                    <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                        <p class="text-[10px] text-white font-medium text-center">${photo.size} MB</p>
+                    </div>
+                `;
+                trashGrid.appendChild(div);
+            });
+        }
+
+    </script>
+</body>
+</html>

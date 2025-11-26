@@ -1,0 +1,54 @@
+# macOS 系统自动生成的临时文件
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+# Swift / Xcode 构建产物与用户配置
+DerivedData/
+build/
+Build/
+*.moved-aside
+*.xccheckout
+*.xcuserstate
+*.xcscmblueprint
+xcuserdata/
+PhotoTidy.xcodeproj/project.xcworkspace/xcuserdata/
+PhotoTidy.xcodeproj/xcuserdata/
+
+# Swift Package Manager 与临时目录
+.build/
+.swiftpm/
+Packages/
+
+# CocoaPods / Carthage（如后续接入依赖管理）
+Pods/
+Carthage/Build/
+Carthage/Checkouts/
+
+# 调试与打包产物
+*.ipa
+*.dSYM
+*.dSYM.zip
+
+# 工具输出
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output/
+
+# 覆盖率与分析文件
+*.profraw
+*.profdata
+coverage/
+
+# 编辑器与自定义脚本缓存
+*.swp
+*.swo
+*.orig
+.vscode/
+.idea/
+
