@@ -76,20 +76,12 @@ struct ScreenshotDocumentView: View {
         let isActive = filterIndex == index
         return Text(title)
             .font(.system(size: 11, weight: isActive ? .bold : .medium))
-            .foregroundColor(
-                isActive
-                ? (isPrimary ? Color("brand-start") : .gray)
-                : .gray
-            )
+            .foregroundColor(isActive ? Color("brand-start") : .gray)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 999, style: .continuous)
-                    .fill(
-                        isActive
-                        ? (isPrimary ? Color("brand-start").opacity(0.12) : Color(UIColor.systemGray5))
-                        : Color(UIColor.systemGray5)
-                    )
+                    .fill(isActive ? Color("brand-start").opacity(0.12) : Color(UIColor.systemGray5))
             )
             .onTapGesture {
                 withAnimation(.easeInOut(duration: 0.2)) {
