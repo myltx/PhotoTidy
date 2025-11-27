@@ -5,6 +5,7 @@ struct BlurryReviewView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var selectedIds: Set<String> = []
+    @State private var previewItem: PhotoItem?
 
     private var blurryItems: [PhotoItem] {
         viewModel.items.filter { $0.isBlurredOrShaky || $0.exposureIsBad }
@@ -12,20 +13,27 @@ struct BlurryReviewView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                if blurryItems.isEmpty {
-                    Spacer()
-                    Text("暂无模糊照片").foregroundColor(.secondary)
-                    Spacer()
-                } else {
-                    blurSummary
-                    blurryGrid
-                    deleteButton
+            ZStack {
+                Color(UIColor.systemBackground).ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    headerSection
+
+                    if blurryItems.isEmpty {
+                        Spacer()
+                        Text("暂无模糊或曝光异常照片")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    } else {
+                        blurryGrid
+
+                        deleteButton
+                            .padding(.horizontal, 24)
+                            .padding(.bottom, 24)
+                    }
                 }
             }
-            .padding()
-            .navigationTitle("模糊照片")
-            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { dismiss() }
@@ -34,52 +42,112 @@ struct BlurryReviewView: View {
             .onAppear {
                 selectedIds = Set(blurryItems.map(\.id))
             }
+            .fullScreenCover(item: $previewItem) { item in
+                FullScreenPreviewView(item: item, viewModel: viewModel)
+            }
         }
     }
 
-    private var blurSummary: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 6) {
+    private var headerSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("模糊照片")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundColor(.primary)
+
+            HStack {
                 Text("已选中 \(selectedIds.count) 张")
-                    .font(.headline)
-                Text("建议删除模糊、曝光异常的照片").font(.caption).foregroundColor(.secondary)
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+
+                Spacer()
+
+                Button(action: {
+                    selectedIds = Set(blurryItems.map(\.id))
+                }) {
+                    Text("全选")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(Color("brand-start"))
+                }
             }
-            Spacer()
-            Button("全选") { selectedIds = Set(blurryItems.map(\.id)) }
-                .font(.subheadline.bold())
         }
+        .padding(.horizontal, 24)
+        .padding(.top, 24)
+        .padding(.bottom, 8)
     }
 
     private var blurryGrid: some View {
         ScrollView {
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                 ForEach(blurryItems, id: \.id) { item in
+                    let isSelected = selectedIds.contains(item.id)
+
                     ZStack(alignment: .topTrailing) {
-                        AssetThumbnailView(asset: item.asset, imageManager: viewModel.imageManager, contentMode: .aspectFill)
-                            .aspectRatio(1, contentMode: .fit)
-                            .cornerRadius(20)
-                            .overlay(
-                                VStack(alignment: .leading) {
-                                    Text(item.isBlurredOrShaky ? "模糊" : "曝光")
-                                        .font(.caption2).bold()
-                                        .padding(6)
-                                        .background(Color.red.opacity(0.8))
-                                        .foregroundColor(.white)
-                                        .clipShape(Capsule())
-                                    Spacer()
-                                }
-                                    .padding(8),
-                                alignment: .bottomLeading
+                        ZStack(alignment: .bottomLeading) {
+                            AssetThumbnailView(
+                                asset: item.asset,
+                                imageManager: viewModel.imageManager,
+                                contentMode: .aspectFill
                             )
-                        Button(action: { toggleSelection(item) }) {
-                            Image(systemName: selectedIds.contains(item.id) ? "checkmark.circle.fill" : "circle")
-                                .font(.title3)
-                                .foregroundColor(selectedIds.contains(item.id) ? Color("brand-start") : .white)
-                                .padding(10)
+                            .aspectRatio(1, contentMode: .fill)
+                            .clipped()
+                            .opacity(isSelected ? 1.0 : 0.5)
+
+                            if item.isBlurredOrShaky || item.exposureIsBad {
+                                Text(item.isBlurredOrShaky ? "模糊" : "曝光不足")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 3)
+                                    .background(
+                                        (item.isBlurredOrShaky ? Color.red : Color.black)
+                                            .opacity(0.8)
+                                    )
+                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    .padding(8)
+                            }
                         }
+                        .background(Color(UIColor.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+                        Button(action: { toggleSelection(item) }) {
+                            ZStack {
+                                Circle()
+                                    .fill(isSelected ? Color("brand-start") : Color.white.opacity(0.9))
+                                    .overlay(
+                                        Circle()
+                                            .stroke(isSelected ? Color("brand-start") : Color(UIColor.systemGray4), lineWidth: 1)
+                                    )
+                                if isSelected {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(.white)
+                                }
+                            }
+                            .frame(width: 24, height: 24)
+                            .padding(6)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .overlay(alignment: .bottomTrailing) {
+                        Button {
+                            previewItem = item
+                        } label: {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.black.opacity(0.55))
+                                Image(systemName: "magnifyingglass")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.white)
+                            }
+                            .frame(width: 24, height: 24)
+                            .padding(6)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
         }
     }
 
@@ -88,12 +156,14 @@ struct BlurryReviewView: View {
             applyDeletion()
         } label: {
             Text("删除选中 (\(selectedIds.count))")
-                .font(.headline)
-                .foregroundColor(.white)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(selectedIds.isEmpty ? .gray : .red)
                 .frame(maxWidth: .infinity)
-                .padding()
-                .background(selectedIds.isEmpty ? Color.gray : Color.red)
-                .cornerRadius(22)
+                .frame(height: 48)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(selectedIds.isEmpty ? Color(UIColor.systemGray5) : Color.red.opacity(0.08))
+                )
         }
         .disabled(selectedIds.isEmpty)
     }

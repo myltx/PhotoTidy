@@ -12,7 +12,12 @@ struct FullScreenPreviewView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            // 背景黑色区域，点击空白处可关闭
+            Color.black
+                .ignoresSafeArea()
+                .onTapGesture {
+                    dismiss()
+                }
 
             VStack {
                 Spacer()
@@ -55,10 +60,15 @@ struct FullScreenPreviewView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 28))
-                            .foregroundColor(.white)
-                            .padding()
+                        ZStack {
+                            Circle()
+                                .fill(Color.black.opacity(0.6))
+                            Image(systemName: "xmark")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                        .frame(width: 32, height: 32)
+                        .padding()
                     }
                     Spacer()
                 }

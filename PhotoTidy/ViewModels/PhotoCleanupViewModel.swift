@@ -133,9 +133,11 @@ final class PhotoCleanupViewModel: ObservableObject {
                     exposureIsBad: false,
                     isBlurredOrShaky: false,
                     isDocumentLike: false,
+                    isTextImage: false,
                     isLargeFile: fileSize > 10 * 1024 * 1024,
                     similarGroupId: nil,
                     similarityKind: nil,
+                    assetType: nil,
                     markedForDeletion: false
                 )
                 loadedItems.append(item)
@@ -204,11 +206,6 @@ final class PhotoCleanupViewModel: ObservableObject {
                         analyzedItems[index].exposureIsBad = exposureBad
                         analyzedItems[index].isBlurredOrShaky = isBlurred
 
-                        if !item.isVideo && !item.isScreenshot {
-                            let isDoc = analysisService.isDocumentLike(image: image)
-                            analyzedItems[index].isDocumentLike = isDoc
-                        }
-
                         analyzedItems[index].isLargeFile = item.fileSize > 15 * 1024 * 1024
 
                         if !item.isVideo {
@@ -216,6 +213,29 @@ final class PhotoCleanupViewModel: ObservableObject {
                             let hash = analysisService.perceptualHash(for: image)
                             pHashes[index] = hash
                             analyzedItems[index].pHash = hash
+
+                            // 使用 AssetTypeDetector 进行截图 / 文档 / 文字图片 分类
+                            if #available(iOS 16.0, *), let cgImage = image.cgImage {
+                                let type = AssetTypeDetector.shared.detectAssetTypeSync(asset: item.asset, image: cgImage)
+                                analyzedItems[index].assetType = type
+                                switch type {
+                                case .screenshot:
+                                    analyzedItems[index].isScreenshot = true
+                                    analyzedItems[index].isDocumentLike = false
+                                    analyzedItems[index].isTextImage = false
+                                case .document:
+                                    analyzedItems[index].isDocumentLike = true
+                                    analyzedItems[index].isTextImage = false
+                                case .textImage:
+                                    analyzedItems[index].isTextImage = true
+                                case .normalPhoto:
+                                    break
+                                }
+                            } else if !item.isScreenshot {
+                                // 老设备或无法使用 Vision：退化为原有的文档检测逻辑
+                                let isDoc = analysisService.isDocumentLike(image: image)
+                                analyzedItems[index].isDocumentLike = isDoc
+                            }
                         }
                     } else {
                         // 缩略图获取失败，至少把大文件标记逻辑跑一下
