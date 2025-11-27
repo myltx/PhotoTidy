@@ -33,6 +33,10 @@ struct CleanerContainerView: View {
                             .padding(.horizontal, 20)
                     }
                     .padding(.top, 8)
+                } else if viewModel.isLoading {
+                    Spacer()
+                    LoadingPhotosView()
+                    Spacer()
                 } else {
                     Spacer()
                     NoMorePhotosView()
@@ -86,6 +90,26 @@ private struct NoMorePhotosView: View {
                .font(.subheadline)
                .foregroundColor(.secondary)
        }
+    }
+}
+
+private struct LoadingPhotosView: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .progressViewStyle(.circular)
+                .scaleEffect(1.2)
+            Text("正在准备您的照片…")
+                .font(.headline)
+                .foregroundColor(.primary)
+            Text("首次加载相册可能稍慢，请耐心等待。")
+                .font(.footnote)
+                .foregroundColor(.secondary)
+        }
+        .padding(32)
+        .background(.ultraThinMaterial)
+        .cornerRadius(24)
+        .shadow(color: .black.opacity(0.15), radius: 20, y: 10)
     }
 }
 

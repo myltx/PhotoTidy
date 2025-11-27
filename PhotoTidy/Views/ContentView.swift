@@ -30,15 +30,24 @@ struct MainAppView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
 
     var body: some View {
-        VStack(spacing: 0) {
-            if viewModel.currentTab == .dashboard {
-                DashboardView(viewModel: viewModel)
-            } else if viewModel.currentTab == .trash {
-                TrashView(viewModel: viewModel)
-            } else {
-                SettingsView(viewModel: viewModel)
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
+                if viewModel.currentTab == .dashboard {
+                    DashboardView(viewModel: viewModel)
+                } else if viewModel.currentTab == .trash {
+                    TrashView(viewModel: viewModel)
+                } else {
+                    SettingsView(viewModel: viewModel)
+                }
             }
+
             BottomNavBar(viewModel: viewModel)
+
+            if viewModel.isLoading && viewModel.items.isEmpty {
+                SplashLoadingView()
+                    .transition(.opacity)
+                    .zIndex(1)
+            }
         }
         .animation(.default, value: viewModel.currentTab)
         .fullScreenCover(isPresented: $viewModel.isShowingCleaner) {

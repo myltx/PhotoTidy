@@ -36,7 +36,17 @@ private extension DashboardView {
                     .font(.caption)
                     .foregroundColor(.secondary)
 
-                if viewModel.isAnalyzing {
+                if viewModel.isLoading {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .scaleEffect(0.6)
+                        Text("正在加载相册…")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.top, 2)
+                } else if viewModel.isAnalyzing {
                     HStack(spacing: 6) {
                         ProgressView()
                             .progressViewStyle(.circular)
@@ -94,22 +104,36 @@ private extension DashboardView {
                     .foregroundColor(Color.white.opacity(0.8))
 
                 Button(action: {
+                    guard !viewModel.isLoading else { return }
                     viewModel.showCleaner(filter: .all)
                 }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(Color.indigo)
-                        Text("开始")
-                            .font(.system(size: 12, weight: .bold))
+                    Group {
+                        if viewModel.isLoading {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .progressViewStyle(.circular)
+                                Text("正在准备…")
+                                    .font(.system(size: 12, weight: .bold))
+                            }
+                            .foregroundColor(.gray)
+                        } else {
+                            HStack(spacing: 6) {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(Color.indigo)
+                                Text("开始")
+                                    .font(.system(size: 12, weight: .bold))
+                            }
+                            .foregroundColor(.black)
+                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                    .background(Color.white)
-                    .foregroundColor(.black)
+                    .background(Color.white.opacity(viewModel.isLoading ? 0.8 : 1))
                     .cornerRadius(14)
                 }
                 .padding(.top, 6)
+                .disabled(viewModel.isLoading)
             }
             .padding(.leading, 20)
             .padding(.bottom, 28)
@@ -119,6 +143,7 @@ private extension DashboardView {
         .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
         .shadow(color: .black.opacity(0.25), radius: 18, y: 10)
         .onTapGesture {
+            guard !viewModel.isLoading else { return }
             viewModel.showCleaner(filter: .all)
         }
     }
@@ -171,6 +196,7 @@ private extension DashboardView {
         }
         .padding(.bottom, 40)
     }
+
 }
 
 // MARK: - Smart Tile
