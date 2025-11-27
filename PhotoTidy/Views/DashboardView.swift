@@ -3,6 +3,7 @@ import Photos
 
 struct DashboardView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
+    @State private var showTrashSheet = false
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -23,6 +24,11 @@ struct DashboardView: View {
             .padding(.bottom, 120)
         }
         .background(Color(UIColor.systemGray6))
+        .sheet(isPresented: $showTrashSheet) {
+            PendingDeletionView(viewModel: viewModel)
+                .presentationDetents([.fraction(0.6), .large])
+                .presentationDragIndicator(.visible)
+        }
     }
 }
 
@@ -263,7 +269,7 @@ private extension DashboardView {
             title: "待删区",
             subtitle: "共 \(viewModel.pendingDeletionItems.count) 张 • 可释放 \(viewModel.pendingDeletionTotalSize.fileSizeDescription)",
             buttonTitle: "查看",
-            action: { viewModel.showTrash() }
+            action: { showTrashSheet = true }
         ) {
             let items = viewModel.pendingDeletionItems.prefix(4)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {

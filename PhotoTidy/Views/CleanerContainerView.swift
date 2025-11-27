@@ -2,10 +2,11 @@ import SwiftUI
 
 struct CleanerContainerView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
+    @State private var showTrashSheet = false
 
     var body: some View {
         VStack(spacing: 0) {
-            CleanerHeader(viewModel: viewModel)
+            CleanerHeader(viewModel: viewModel, showTrashSheet: $showTrashSheet)
             
             Spacer()
 
@@ -24,6 +25,11 @@ struct CleanerContainerView: View {
             CleanerFooter(viewModel: viewModel)
         }
         .background(Color(UIColor.systemBackground))
+        .sheet(isPresented: $showTrashSheet) {
+            PendingDeletionView(viewModel: viewModel)
+                .presentationDetents([.fraction(0.6), .large])
+                .presentationDragIndicator(.visible)
+        }
     }
 }
 
@@ -64,6 +70,7 @@ private struct PhotoMetaView: View {
 
 private struct CleanerHeader: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
+    @Binding var showTrashSheet: Bool
     
     var body: some View {
         HStack {
@@ -89,7 +96,7 @@ private struct CleanerHeader: View {
             
             Spacer()
             
-            Button(action: { viewModel.showTrash() }) {
+            Button(action: { showTrashSheet = true }) {
                 ZStack {
                     Image(systemName: "trash")
                         .font(.headline.weight(.bold))

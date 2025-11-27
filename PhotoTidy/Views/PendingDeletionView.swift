@@ -5,6 +5,7 @@ struct PendingDeletionView: View {
     @State private var showingConfirmAlert = false
     @State private var deleting = false
     @State private var deleteError: Error?
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,17 +19,18 @@ struct PendingDeletionView: View {
                 
                 // Header
                 HStack {
-                    Text("待删除")
-                        .font(.title2).bold()
-                    +
-                    Text(" (\(viewModel.pendingDeletionItems.count))")
-                        .font(.title2)
-                        .foregroundColor(.secondary)
+                    HStack(spacing: 4) {
+                        Text("待删除")
+                            .font(.title2).bold()
+                        Text("(\(viewModel.pendingDeletionItems.count))")
+                            .font(.title2)
+                            .foregroundColor(.secondary)
+                    }
                     
                     Spacer()
                     
                     Button("关闭") {
-                        viewModel.hideTrash()
+                        dismiss()
                     }
                     .font(.body).foregroundColor(.secondary)
                 }
@@ -73,7 +75,7 @@ struct PendingDeletionView: View {
                 viewModel.performDeletion { success, error in
                     deleting = false
                     if success {
-                        viewModel.hideTrash()
+                        dismiss()
                     } else {
                         deleteError = error
                     }

@@ -30,45 +30,21 @@ struct MainAppView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
 
     var body: some View {
-        ZStack {
-            // Main content based on tab
-            VStack {
-                if viewModel.currentTab == .dashboard {
-                    DashboardView(viewModel: viewModel)
-                } else if viewModel.currentTab == .album {
-                    AlbumGridView(viewModel: viewModel)
-                } else {
-                    SettingsView(viewModel: viewModel)
-                }
+        VStack(spacing: 0) {
+            if viewModel.currentTab == .dashboard {
+                DashboardView(viewModel: viewModel)
+            } else if viewModel.currentTab == .album {
+                AlbumGridView(viewModel: viewModel)
+            } else {
+                SettingsView(viewModel: viewModel)
             }
-            .zIndex(0)
-
-            // Bottom Navigation
-            VStack {
-                Spacer()
-                BottomNavBar(viewModel: viewModel)
-            }
-            .zIndex(2)
-            .transition(.move(edge: .bottom))
-            .opacity(viewModel.isShowingCleaner ? 0 : 1)
-
-            // Cleaner View (Slides over everything)
-            if viewModel.isShowingCleaner {
-                CleanerContainerView(viewModel: viewModel)
-                    .zIndex(3)
-                    .transition(.move(edge: .trailing))
-            }
-            
-            // Pending Deletion View (Slides up)
-            if viewModel.isShowingTrash {
-                PendingDeletionView(viewModel: viewModel)
-                    .zIndex(4)
-                    .transition(.move(edge: .bottom))
-            }
+            BottomNavBar(viewModel: viewModel)
+                .padding(.bottom, 8)
         }
-        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: viewModel.isShowingCleaner)
-        .animation(.spring(response: 0.5, dampingFraction: 0.8), value: viewModel.isShowingTrash)
         .animation(.default, value: viewModel.currentTab)
+        .fullScreenCover(isPresented: $viewModel.isShowingCleaner) {
+            CleanerContainerView(viewModel: viewModel)
+        }
         .sheet(item: $viewModel.activeDetail, onDismiss: {
             viewModel.dismissDetail()
         }) { detail in

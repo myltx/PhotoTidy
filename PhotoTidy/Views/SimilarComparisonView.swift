@@ -7,8 +7,18 @@ struct SimilarComparisonView: View {
     @State private var selectedId: String?
 
     private var groups: [[PhotoItem]] {
-        let grouped = Dictionary(grouping: viewModel.items.filter { $0.similarGroupId != nil }) { $0.similarGroupId ?? -1 }
-        return grouped.values.sorted { ($0.first?.creationDate ?? .distantPast) > ($1.first?.creationDate ?? .distantPast) }
+        // 使用显式循环代替高级组合操作，减轻编译器负担
+        var dict: [Int: [PhotoItem]] = [:]
+        for item in viewModel.items {
+            guard let gid = item.similarGroupId else { continue }
+            dict[gid, default: []].append(item)
+        }
+        let values = Array(dict.values)
+        return values.sorted { lhsGroup, rhsGroup in
+            let lDate = lhsGroup.first?.creationDate ?? .distantPast
+            let rDate = rhsGroup.first?.creationDate ?? .distantPast
+            return lDate > rDate
+        }
     }
 
     private var currentGroup: [PhotoItem]? { groups.first }
