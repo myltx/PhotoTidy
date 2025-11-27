@@ -12,67 +12,64 @@ struct BlurryReviewView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color(UIColor.systemBackground).ignoresSafeArea()
+        ZStack {
+            Color(UIColor.systemBackground).ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    headerSection
+            VStack(spacing: 0) {
+                ModalNavigationHeader(
+                    title: "模糊照片",
+                    onClose: { dismiss() }
+                )
 
-                    if blurryItems.isEmpty {
-                        Spacer()
-                        Text("暂无模糊或曝光异常照片")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                    } else {
-                        blurryGrid
+                headerSection
 
-                        deleteButton
-                            .padding(.horizontal, 24)
-                            .padding(.bottom, 24)
-                    }
+                if blurryItems.isEmpty {
+                    Spacer()
+                    Text("暂无模糊或曝光异常照片")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                } else {
+                    blurryGrid
+
+                    deleteButton
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 24)
                 }
             }
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
-                }
-            }
-            .onAppear {
-                selectedIds = Set(blurryItems.map(\.id))
-            }
-            .fullScreenCover(item: $previewItem) { item in
-                FullScreenPreviewView(item: item, viewModel: viewModel)
-            }
+        }
+        .onAppear {
+            selectedIds = Set(blurryItems.map(\.id))
+        }
+        .fullScreenCover(item: $previewItem) { item in
+            FullScreenPreviewView(item: item, viewModel: viewModel)
         }
     }
 
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("模糊照片")
-                .font(.system(size: 22, weight: .bold))
-                .foregroundColor(.primary)
-
-            HStack {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("已选中 \(selectedIds.count) 张")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
 
-                Spacer()
+                Text("建议删除模糊、曝光异常的照片")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
 
-                Button(action: {
-                    selectedIds = Set(blurryItems.map(\.id))
-                }) {
-                    Text("全选")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(Color("brand-start"))
-                }
+            Spacer()
+
+            Button(action: {
+                selectedIds = Set(blurryItems.map(\.id))
+            }) {
+                Text("全选")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(Color("brand-start"))
             }
         }
         .padding(.horizontal, 24)
-        .padding(.top, 24)
-        .padding(.bottom, 8)
+        .padding(.vertical, 10)
     }
 
     private var blurryGrid: some View {

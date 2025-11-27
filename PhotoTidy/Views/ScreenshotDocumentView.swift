@@ -25,54 +25,43 @@ struct ScreenshotDocumentView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color(UIColor.systemGray6).ignoresSafeArea()
+        ZStack {
+            Color(UIColor.systemGray6).ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    header
+            VStack(spacing: 0) {
+                ModalNavigationHeader(
+                    title: "文档 & 截图",
+                    onClose: { dismiss() }
+                )
 
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(filteredDocs, id: \.id) { item in
-                                docRow(for: item)
-                            }
+                header
+
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(filteredDocs, id: \.id) { item in
+                            docRow(for: item)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
                     }
-                }
-            }
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
                 }
             }
         }
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("文档 & 截图")
-                .font(.system(size: 22, weight: .bold))
-                .foregroundColor(.primary)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    filterChip(title: "全部", index: 0, isPrimary: true)
-                    filterChip(title: "票据", index: 1, isPrimary: false)
-                    filterChip(title: "文字图片", index: 2, isPrimary: false)
-                }
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                filterChip(title: "全部", index: 0)
+                filterChip(title: "票据", index: 1)
+                filterChip(title: "文字图片", index: 2)
             }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 8)
         }
-        .padding(.horizontal, 24)
-        .padding(.top, 24)
-        .padding(.bottom, 12)
-        .background(Color.white)
-        .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
     }
 
-    private func filterChip(title: String, index: Int, isPrimary: Bool) -> some View {
+    private func filterChip(title: String, index: Int) -> some View {
         let isActive = filterIndex == index
         return Text(title)
             .font(.system(size: 11, weight: isActive ? .bold : .medium))

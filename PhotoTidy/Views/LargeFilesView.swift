@@ -17,44 +17,42 @@ struct LargeFilesView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color(UIColor.systemBackground).ignoresSafeArea()
+        ZStack {
+            Color(UIColor.systemBackground).ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    headerSection
+            VStack(spacing: 0) {
+                ModalNavigationHeader(
+                    title: "大文件清理",
+                    onClose: { dismiss() }
+                )
 
-                    if largeItems.isEmpty {
-                        Spacer()
-                        Text("未检测到大文件")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                    } else {
-                        ScrollView {
-                            VStack(spacing: 16) {
-                                if let first = largeItems.first {
-                                    heroCard(for: first)
-                                }
+                headerSection
 
-                                if largeItems.count > 1 {
-                                    VStack(spacing: 12) {
-                                        ForEach(Array(largeItems.dropFirst()), id: \.id) { item in
-                                            listRow(for: item)
-                                        }
+                if largeItems.isEmpty {
+                    Spacer()
+                    Text("未检测到大文件")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                } else {
+                    ScrollView {
+                        VStack(spacing: 16) {
+                            if let first = largeItems.first {
+                                heroCard(for: first)
+                            }
+
+                            if largeItems.count > 1 {
+                                VStack(spacing: 12) {
+                                    ForEach(Array(largeItems.dropFirst()), id: \.id) { item in
+                                        listRow(for: item)
                                     }
                                 }
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.top, 8)
-                            .padding(.bottom, 24)
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .padding(.bottom, 24)
                     }
-                }
-            }
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
                 }
             }
         }
@@ -63,9 +61,6 @@ struct LargeFilesView: View {
     private var headerSection: some View {
         HStack(alignment: .lastTextBaseline) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("大文件清理")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundColor(.primary)
                 Text("占用空间前 10 名")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)

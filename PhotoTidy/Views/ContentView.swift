@@ -33,13 +33,12 @@ struct MainAppView: View {
         VStack(spacing: 0) {
             if viewModel.currentTab == .dashboard {
                 DashboardView(viewModel: viewModel)
-            } else if viewModel.currentTab == .album {
-                AlbumGridView(viewModel: viewModel)
+            } else if viewModel.currentTab == .trash {
+                TrashView(viewModel: viewModel)
             } else {
                 SettingsView(viewModel: viewModel)
             }
             BottomNavBar(viewModel: viewModel)
-                .padding(.bottom, 8)
         }
         .animation(.default, value: viewModel.currentTab)
         .fullScreenCover(isPresented: $viewModel.isShowingCleaner) {
@@ -141,8 +140,8 @@ struct BottomNavBar: View {
                 viewModel.currentTab = .dashboard
             }
             Spacer()
-            NavButton(icon: "photo.stack", text: "相册", isActive: viewModel.currentTab == .album) {
-                viewModel.currentTab = .album
+            NavButton(icon: "trash.fill", text: "待删区", isActive: viewModel.currentTab == .trash) {
+                viewModel.currentTab = .trash
             }
             Spacer()
             NavButton(icon: "gearshape.fill", text: "设置", isActive: viewModel.currentTab == .settings) {
@@ -150,7 +149,7 @@ struct BottomNavBar: View {
             }
             Spacer()
         }
-        .frame(height: 85)
+        .frame(height: 65)
         .background(.bar)
         .cornerRadius(24)
         .padding(.horizontal)

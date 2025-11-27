@@ -6,16 +6,23 @@ struct CleanerContainerView: View {
 
     var body: some View {
         ZStack {
-            // 背景做成浅灰到白色的过渡，贴近高保真设计的「phone-frame」感觉
-            LinearGradient(
-                colors: [Color(UIColor.systemGray6), Color(UIColor.systemBackground)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+            Color.white
+                .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                CleanerHeader(viewModel: viewModel, showTrashSheet: $showTrashSheet)
+                topBar
+
+                if viewModel.isAnalyzing {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .scaleEffect(0.6)
+                        Text("AI 正在分析中…")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.bottom, 8)
+                }
 
                 if viewModel.currentItem != nil {
                     VStack(spacing: 12) {
@@ -47,6 +54,25 @@ struct CleanerContainerView: View {
     }
 }
 
+private extension CleanerContainerView {
+    var topBar: some View {
+        ZStack(alignment: .topTrailing) {
+            ModalNavigationHeader(
+                title: viewModel.currentFilter.rawValue,
+                onClose: { viewModel.hideCleaner() }
+            )
+
+            TrashButton(
+                pendingCount: viewModel.pendingDeletionItems.count,
+                action: { showTrashSheet = true }
+            )
+            .padding(.trailing, 24)
+            .padding(.top, 18)
+        }
+        .padding(.bottom, 6)
+    }
+}
+
 private struct NoMorePhotosView: View {
     var body: some View {
         VStack {
@@ -70,7 +96,10 @@ private struct PhotoMetaView: View {
         VStack {
             if let item = viewModel.currentItem {
                 Text(item.asset.originalFilename)
-                    .font(.headline).bold()
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                 Text("\(item.fileSizeInMB) • \(item.creationDate?.formatted(date: .long, time: .omitted) ?? "")")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -122,71 +151,39 @@ private struct SwipeDateHeaderView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 12)
-        .padding(.bottom, 6)
-        .background(
-            LinearGradient(
-                colors: [Color(UIColor.systemGray6), Color.clear],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
+        .padding(.top, 4)
+        .padding(.bottom, 10)
+        .padding(.horizontal, 24)
     }
 }
 
+private struct TrashButton: View {
+    let pendingCount: Int
+    let action: () -> Void
 
-private struct CleanerHeader: View {
-    @ObservedObject var viewModel: PhotoCleanupViewModel
-    @Binding var showTrashSheet: Bool
-    
     var body: some View {
-        HStack {
-            Button(action: { viewModel.hideCleaner() }) {
-                Image(systemName: "chevron.left")
-                    .font(.headline.weight(.bold))
-                    .frame(width: 44, height: 44)
-                    .background(Color.gray.opacity(0.1))
-                    .clipShape(Circle())
-            }
-            
-            Spacer()
-            
-            VStack {
-                Text(viewModel.currentFilter.rawValue)
-                    .font(.headline).bold()
-                if viewModel.isAnalyzing {
-                    Text("AI 智能识别中...")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            Spacer()
-            
-            Button(action: { showTrashSheet = true }) {
-                ZStack {
-                    Image(systemName: "trash")
-                        .font(.headline.weight(.bold))
-                        .frame(width: 44, height: 44)
-                        .background(Color.gray.opacity(0.1))
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 40, height: 40)
+                    .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+                Image(systemName: "trash")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.primary)
+
+                if pendingCount > 0 {
+                    Text("\(pendingCount)")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 20, height: 20)
+                        .background(Color.red)
                         .clipShape(Circle())
-                    
-                    if !viewModel.pendingDeletionItems.isEmpty {
-                        Text("\(viewModel.pendingDeletionItems.count)")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(minWidth: 18, minHeight: 18)
-                            .background(Color.red)
-                            .clipShape(Circle())
-                            .offset(x: 14, y: -14)
-                            .transition(.scale.animation(.spring()))
-                    }
+                        .offset(x: 12, y: -14)
                 }
             }
         }
-        .padding(.horizontal)
-        .padding(.top, 50)
-        .padding(.bottom, 10)
+        .buttonStyle(.plain)
     }
 }
 

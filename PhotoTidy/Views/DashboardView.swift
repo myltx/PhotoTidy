@@ -35,6 +35,18 @@ private extension DashboardView {
                 Text("本机存储已用 82%")
                     .font(.caption)
                     .foregroundColor(.secondary)
+
+                if viewModel.isAnalyzing {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .scaleEffect(0.6)
+                        Text("AI 正在分析相似照片…")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.top, 2)
+                }
             }
             Spacer()
             Image(systemName: "person.crop.circle.fill")
@@ -50,25 +62,12 @@ private extension DashboardView {
 
     var heroCleanerCard: some View {
         ZStack(alignment: .bottomLeading) {
-            // 背景图：全相册整理背景
-            AsyncImage(
-                url: URL(string: "https://mp-d78a9abc-b098-4e6b-a411-81bf347d6358.cdn.bspapp.com/PhotoTidy/all_album_bg.jpeg")
-            ) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFill()
-                case .failure(_):
-                    Color.black
-                case .empty:
-                    Color.black.opacity(0.4)
-                @unknown default:
-                    Color.black
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
+            // 背景图：改为使用本地 Assets，避免依赖网络
+            Image("all_album_bg")
+                .resizable()
+                .scaledToFill()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
 
             // 底部向上的渐变遮罩，增强文字可读性
             LinearGradient(
@@ -113,7 +112,7 @@ private extension DashboardView {
                 .padding(.top, 6)
             }
             .padding(.leading, 20)
-            .padding(.bottom, 20)
+            .padding(.bottom, 28)
         }
         .frame(maxWidth: .infinity)
         .frame(height: 240)

@@ -1,37 +1,26 @@
 import SwiftUI
 import Photos
 
-private enum SimilarLayoutMode {
-    case stacked
-    case sideBySide
-}
-
+/// 相似照片分组对比视图（按高保真设计稿重构版）
 struct SimilarComparisonView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
     @Environment(\.dismiss) private var dismiss
+
     @State private var selectedId: String?
     @State private var currentGroupIndex: Int = 0
-    @State private var layoutMode: SimilarLayoutMode = .stacked
-
-    private var groups: [[PhotoItem]] {
-        // 使用显式循环代替高级组合操作，减轻编译器负担
-        var dict: [Int: [PhotoItem]] = [:]
-        for item in viewModel.items {
-            guard let gid = item.similarGroupId else { continue }
-            dict[gid, default: []].append(item)
-        }
-        let values = Array(dict.values)
-        return values.sorted { lhsGroup, rhsGroup in
-            let lDate = lhsGroup.first?.creationDate ?? .distantPast
-            let rDate = rhsGroup.first?.creationDate ?? .distantPast
-            return lDate > rDate
-        }
-    }
+    @State private var cachedGroups: [[PhotoItem]] = []
+    @State private var previewItem: PhotoItem?
 
     private var currentGroup: [PhotoItem]? {
-        guard !groups.isEmpty, currentGroupIndex < groups.count else { return nil }
-        return groups[currentGroupIndex]
+        guard !cachedGroups.isEmpty,
+              currentGroupIndex >= 0,
+              currentGroupIndex < cachedGroups.count else { return nil }
+        return cachedGroups[currentGroupIndex]
     }
+
+    private var totalGroups: Int { cachedGroups.count }
+
+    // MARK: - Body
 
     var body: some View {
         ZStack {
@@ -39,176 +28,325 @@ struct SimilarComparisonView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                header
+                ModalNavigationHeader(
+                    title: "相似照片",
+                    onClose: { dismiss() },
+                    rightIcon: "ellipsis",
+                    onRightAction: nil
+                )
 
                 if let group = currentGroup {
-                    let hero = selectedItem(from: group)
-
-                    layoutToggle
-
-                    Spacer(minLength: 20)
-
-                    VStack(spacing: 6) {
-                        Text("相似度 \(Int.random(in: 90...99))%")
-                            .font(.system(size: 20, weight: .bold))
-                        Text("建议保留 1 张")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.bottom, 20)
-
-                    Group {
-                        if layoutMode == .stacked {
-                            stackedCards(for: group, hero: hero)
-                        } else {
-                            sideBySideCards(for: group, hero: hero)
-                        }
-                    }
-                    .frame(height: 400)
-
-                    Spacer()
-
-                    Button {
-                        if let hero = hero {
-                            applySelection(keep: hero, delete: group.filter { $0.id != hero.id })
-                            moveToNextGroupOrDismiss()
-                        }
-                    } label: {
-                        Text("保留最佳")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 52)
-                            .background(Color("brand-start"))
-                            .cornerRadius(18)
-                            .shadow(color: Color("brand-start").opacity(0.35), radius: 10, y: 6)
-                    }
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 24)
+                    groupContent(for: group)
+                        .id(group.first?.id ?? UUID().uuidString)
                 } else {
-                    Spacer()
-                    Text("没有检测到相似照片")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Spacer()
+                    emptyOrAnalyzingView
                 }
             }
         }
+        .onAppear(perform: recomputeGroups)
+        .onChange(of: viewModel.items) { _ in
+            recomputeGroups()
+        }
         .onChange(of: currentGroupIndex) { _ in
-            if let group = currentGroup {
-                selectedId = group.first?.id
-            }
+            updateSelectionForCurrentGroup()
+        }
+        .fullScreenCover(item: $previewItem) { item in
+            FullScreenPreviewView(item: item, viewModel: viewModel)
         }
     }
 
-    // MARK: - Header
+    // MARK: - Group Content
 
-    private var header: some View {
+    private func groupContent(for group: [PhotoItem]) -> some View {
+        let recommended = recommendedIndex(for: group)
+        let heroIndex = currentHeroIndex(in: group, defaultIndex: recommended)
+        let hero = group[heroIndex]
+
+        return VStack(spacing: 0) {
+            groupNavigationCard
+                .padding(.horizontal, 24)
+                .padding(.top, 4)
+                .padding(.bottom, 4)
+
+            similarityRow(recommendedIndex: recommended)
+                .padding(.horizontal, 24)
+                .padding(.top, 2)
+                .padding(.bottom, 10)
+
+            HeroViewer(
+                item: hero,
+                indexInGroup: heroIndex,
+                totalCount: group.count,
+                onPrevious: { showPreviousInGroup(group) },
+                onNext: { showNextInGroup(group) },
+                onPreview: { previewItem = hero },
+                viewModel: viewModel
+            )
+            .padding(.horizontal, 24)
+            .padding(.top, 4)
+
+            thumbnailStrip(for: group, heroIndex: heroIndex)
+                .padding(.horizontal, 24)
+                .padding(.top, 12)
+
+            Spacer()
+
+            bottomActions(for: group, heroIndex: heroIndex)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 20)
+        }
+    }
+
+    // MARK: - Group Navigation Card
+
+    private var groupNavigationCard: some View {
         HStack {
             Button {
-                dismiss()
+                moveToPreviousGroup()
             } label: {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.primary)
-                    .frame(width: 32, height: 32)
-                    .background(Color.white)
-                    .clipShape(Circle())
-                    .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.secondary)
+                    .frame(width: 40, height: 36)
+                    .background(Color(UIColor.systemGray6))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .disabled(currentGroupIndex == 0 || totalGroups == 0)
+            .opacity(currentGroupIndex == 0 || totalGroups == 0 ? 0.4 : 1.0)
+
+            Spacer()
+
+            VStack(spacing: 2) {
+                if totalGroups > 0 {
+                    Text("第 \(min(currentGroupIndex + 1, totalGroups)) 组")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.primary)
+                    Text("共 \(totalGroups) 组")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.secondary)
+                } else {
+                    Text("相似照片")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.primary)
+                    Text("AI 自动识别重复与相似")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
             }
 
             Spacer()
 
-            if !groups.isEmpty {
-                Text("第 \(min(currentGroupIndex + 1, groups.count)) / \(groups.count) 组")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.primary)
-            } else {
-                Text("相似照片")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.primary)
+            Button {
+                moveToNextGroup()
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 40, height: 36)
+                    .background(Color("brand-start").opacity(0.9))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
-
-            Spacer()
-
-            // 右侧留空位，使标题居中
-            Color.clear
-                .frame(width: 32, height: 32)
+            .disabled(totalGroups == 0 || currentGroupIndex >= totalGroups - 1)
+            .opacity(totalGroups == 0 || currentGroupIndex >= totalGroups - 1 ? 0.4 : 1.0)
         }
-        .padding(.horizontal, 24)
-        .padding(.top, 18)
+        .padding(6)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.white)
+                .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color(UIColor.systemGray5), lineWidth: 1)
+                )
+        )
     }
 
-    // MARK: - Layout Toggle
+    // MARK: - Similarity Row
 
-    private var layoutToggle: some View {
-        HStack(spacing: 8) {
-            Spacer()
-            layoutToggleButton(
-                title: "堆叠",
-                systemImage: "square.stack.3d.forward.dottedline.fill",
-                mode: .stacked
-            )
-            layoutToggleButton(
-                title: "对比",
-                systemImage: "square.split.2x1.fill",
-                mode: .sideBySide
-            )
-            Spacer()
-        }
-        .padding(.top, 12)
-    }
+    private func similarityRow(recommendedIndex: Int) -> some View {
+        HStack {
+            Text("相似度 \(Int.random(in: 90...99))%")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(Color("brand-start"))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color("brand-start").opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-    private func layoutToggleButton(
-        title: String,
-        systemImage: String,
-        mode: SimilarLayoutMode
-    ) -> some View {
-        let isActive = layoutMode == mode
-        return Button {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                layoutMode = mode
-            }
-        } label: {
+            Spacer()
+
             HStack(spacing: 4) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 11, weight: .semibold))
-                Text(title)
-                    .font(.system(size: 11, weight: .semibold))
+                Image(systemName: "wand.and.stars")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.yellow)
+                Text("建议保留:")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
+                Text("第 \(recommendedIndex + 1) 张")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.primary)
             }
-            .padding(.vertical, 6)
-            .padding(.horizontal, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(isActive ? Color.white : Color.white.opacity(0.7))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(isActive ? Color("brand-start") : Color.clear, lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(isActive ? 0.15 : 0.05), radius: isActive ? 6 : 3, y: 2)
         }
-        .buttonStyle(.plain)
     }
 
-    // MARK: - Helpers
-
-    private func selectedItem(from group: [PhotoItem]) -> PhotoItem? {
-        if let selectedId = selectedId, let item = group.first(where: { $0.id == selectedId }) {
-            return item
+    // MARK: - Hero Viewer
+    /// 计算用户当前选择的索引，若尚未选择则回退到推荐索引
+    private func currentHeroIndex(in group: [PhotoItem], defaultIndex: Int) -> Int {
+        if let selectedId = selectedId,
+           let idx = group.firstIndex(where: { $0.id == selectedId }) {
+            return idx
         }
-        let first = group.first
-        selectedId = selectedId ?? first?.id
-        return first
+        return min(max(defaultIndex, 0), group.count - 1)
     }
 
-    private func applySelection(keep hero: PhotoItem, delete others: [PhotoItem]) {
-        viewModel.setDeletion(hero, to: false)
-        others.forEach { viewModel.setDeletion($0, to: true) }
+    /// 简单的推荐索引（可以后续改成基于 blurScore / 曝光等打分）
+    private func recommendedIndex(for group: [PhotoItem]) -> Int {
+        guard !group.isEmpty else { return 0 }
+        var bestIndex = 0
+        var bestScore: Double = -Double.infinity
+        for (idx, item) in group.enumerated() {
+            let blur = item.blurScore ?? 0
+            let exposurePenalty: Double = item.exposureIsBad ? -0.5 : 0.0
+            let score = blur + exposurePenalty
+            if score > bestScore {
+                bestScore = score
+                bestIndex = idx
+            }
+        }
+        return bestIndex
+    }
+
+    private func showPreviousInGroup(_ group: [PhotoItem]) {
+        let idx = currentHeroIndex(in: group, defaultIndex: recommendedIndex(for: group))
+        guard idx > 0 else { return }
+        selectedId = group[idx - 1].id
+    }
+
+    private func showNextInGroup(_ group: [PhotoItem]) {
+        let idx = currentHeroIndex(in: group, defaultIndex: recommendedIndex(for: group))
+        guard idx < group.count - 1 else { return }
+        selectedId = group[idx + 1].id
+    }
+
+    // MARK: - Thumbnail Strip
+
+    private func thumbnailStrip(for group: [PhotoItem], heroIndex: Int) -> some View {
+        let recommendedIndex = recommendedIndex(for: group)
+
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(Array(group.enumerated()), id: \.element.id) { (idx, item) in
+                    let isHero = idx == heroIndex
+                    let isRecommended = idx == recommendedIndex
+
+                    ThumbnailView(
+                        item: item,
+                        isHero: isHero,
+                        isRecommended: isRecommended,
+                        imageManager: viewModel.imageManager
+                    )
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            selectedId = item.id
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    // MARK: - 底部按钮
+
+    private func bottomActions(for group: [PhotoItem], heroIndex: Int) -> some View {
+        let hero = group[heroIndex]
+        let others = group.enumerated().filter { $0.offset != heroIndex }.map { $0.element }
+        let deleteCount = max(others.count, 0)
+
+        return HStack(spacing: 12) {
+            // 跳过本组
+            Button {
+                skipCurrentGroup()
+            } label: {
+                VStack(spacing: 4) {
+                    Image(systemName: "arrowshape.turn.up.right.fill")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.gray)
+                        .rotationEffect(.degrees(180))
+                        .padding(.bottom, 2)
+                    Text("跳过")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            // 保留当前大图，删除其他
+            Button {
+                applySelection(keep: hero, delete: others)
+                moveToNextGroupOrDismiss()
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("保留这张")
+                            .font(.system(size: 15, weight: .bold))
+                        Text("删除其他 \(deleteCount) 张")
+                            .font(.system(size: 10))
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+
+                    Spacer()
+
+                    ZStack {
+                        Circle()
+                            .fill(Color.white.opacity(0.2))
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                    .frame(width: 32, height: 32)
+                }
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .padding(.horizontal, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color("brand-start"), Color("brand-end")],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                )
+                .foregroundColor(.white)
+                .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - 跳组 / 导航
+
+    /// 跳到上一组，不改任何删除标记
+    private func moveToPreviousGroup() {
+        guard currentGroupIndex > 0 else { return }
+        currentGroupIndex -= 1
+    }
+
+    /// 跳到下一组，不改任何删除标记
+    private func moveToNextGroup() {
+        let lastIndex = max(totalGroups - 1, 0)
+        guard currentGroupIndex < lastIndex else { return }
+        currentGroupIndex += 1
+    }
+
+    /// 跳过当前组：只是简单跳到下一组，不做「保留最佳」操作
+    private func skipCurrentGroup() {
+        moveToNextGroupOrDismiss()
     }
 
     private func moveToNextGroupOrDismiss() {
-        let lastIndex = max(groups.count - 1, 0)
+        let lastIndex = max(totalGroups - 1, 0)
         if currentGroupIndex < lastIndex {
             currentGroupIndex += 1
         } else {
@@ -216,109 +354,283 @@ struct SimilarComparisonView: View {
         }
     }
 
-    // MARK: - Card Layouts
-
-    @ViewBuilder
-    private func stackedCards(for group: [PhotoItem], hero: PhotoItem?) -> some View {
-        ZStack {
-            if let hero = hero {
-                // 选出当前组中除“最佳”外的另一张，作为背景卡片
-                if let other = group.first(where: { $0.id != hero.id }) {
-                    comparisonCard(for: other, isHero: false)
-                        .rotationEffect(.degrees(6))
-                        .offset(x: 20, y: 18)
-                }
-
-                comparisonCard(for: hero, isHero: true)
-                    .rotationEffect(.degrees(-3))
-                    .offset(x: -6, y: -10)
-            }
-        }
+    private func applySelection(keep hero: PhotoItem, delete others: [PhotoItem]) {
+        viewModel.setDeletion(hero, to: false)
+        others.forEach { viewModel.setDeletion($0, to: true) }
     }
 
-    @ViewBuilder
-    private func sideBySideCards(for group: [PhotoItem], hero: PhotoItem?) -> some View {
-        if let hero = hero {
-            let others = group.filter { $0.id != hero.id }
-            HStack(spacing: 16) {
-                if let firstOther = others.first {
-                    comparisonCard(for: firstOther, isHero: false, compact: true)
-                } else {
-                    Spacer()
-                }
-                comparisonCard(for: hero, isHero: true, compact: true)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 24)
+    /// 重新根据最新数据计算分组，并修正当前索引和选中项
+    private func recomputeGroups() {
+        var dict: [Int: [PhotoItem]] = [:]
+        for item in viewModel.items {
+            guard let gid = item.similarGroupId else { continue }
+            dict[gid, default: []].append(item)
         }
-    }
+        let values = Array(dict.values)
+        let sorted = values.sorted { lhs, rhs in
+            let lDate = lhs.first?.creationDate ?? .distantPast
+            let rDate = rhs.first?.creationDate ?? .distantPast
+            return lDate > rDate
+        }
+        cachedGroups = sorted
 
-    private func comparisonCard(for item: PhotoItem, isHero: Bool, compact: Bool = false) -> some View {
-        ZStack(alignment: .topLeading) {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color.white)
-                .shadow(color: .black.opacity(isHero ? 0.25 : 0.12), radius: isHero ? 14 : 8, y: 6)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .stroke(isHero ? Color("brand-start") : Color(UIColor.systemGray5), lineWidth: isHero ? 2 : 1)
-                )
-
-            AssetThumbnailView(
-                asset: item.asset,
-                imageManager: viewModel.imageManager,
-                contentMode: .aspectFill
-            )
-            .grayscale(isHero ? 0 : 0.9)
-            .opacity(isHero ? 1.0 : 0.5)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .padding(8)
-
-            if isHero {
-                HStack(spacing: 4) {
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 10, weight: .bold))
-                    Text("最佳")
-                        .font(.system(size: 10, weight: .bold))
-                }
-                .foregroundColor(Color.similarBadgeText)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.yellow)
-                .clipShape(Capsule())
-                .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
-                .padding(10)
+        let cappedIndex = min(max(currentGroupIndex, 0), max(sorted.count - 1, 0))
+        if sorted.isEmpty {
+            currentGroupIndex = 0
+            selectedId = nil
+        } else {
+            if cappedIndex != currentGroupIndex {
+                currentGroupIndex = cappedIndex
             } else {
-                HStack(spacing: 4) {
-                    Image(systemName: "circle")
-                        .font(.system(size: 10, weight: .bold))
-                    Text("未选中")
-                        .font(.system(size: 10, weight: .semibold))
-                }
-                .foregroundColor(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.black.opacity(0.45))
-                .clipShape(Capsule())
-                .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
-                .padding(10)
+                updateSelectionForCurrentGroup()
             }
         }
-        .frame(width: compact ? 150 : 280, height: compact ? 210 : 380)
-        .scaleEffect(
-            isHero
-            ? (compact ? 1.02 : 1.03)
-            : (compact ? 0.98 : 0.96)
-        )
-        .onTapGesture {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.8, blendDuration: 0.2)) {
-                selectedId = item.id
+    }
+
+    /// 当分组或数据变化时，刷新当前选中的照片
+    private func updateSelectionForCurrentGroup() {
+        guard !cachedGroups.isEmpty,
+              currentGroupIndex >= 0,
+              currentGroupIndex < cachedGroups.count else {
+            selectedId = nil
+            return
+        }
+        let group = cachedGroups[currentGroupIndex]
+        guard !group.isEmpty else {
+            selectedId = nil
+            return
+        }
+        if let selectedId = selectedId,
+           group.contains(where: { $0.id == selectedId }) {
+            return
+        }
+        let recommended = recommendedIndex(for: group)
+        selectedId = group[recommended].id
+    }
+
+    // MARK: - 空态 / 分析中
+
+    private var emptyOrAnalyzingView: some View {
+        VStack {
+            Spacer()
+            if viewModel.isAnalyzing {
+                VStack(spacing: 12) {
+                    ProgressView(value: viewModel.analysisProgress)
+                        .progressViewStyle(.linear)
+                        .tint(Color("brand-start"))
+                        .padding(.horizontal, 40)
+                    Text("AI 正在识别相似照片…")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            } else {
+                Text("没有检测到相似照片")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
             }
+            Spacer()
         }
     }
 }
 
-// 简单扩展：用于「最佳」徽标文字颜色
-private extension Color {
-    static let similarBadgeText = Color(red: 0.55, green: 0.4, blue: 0.0)
+// MARK: - Hero Card View
+
+/// 主预览卡片：大图 + 组内左右切换 + 下部信息条
+private struct HeroViewer: View {
+    let item: PhotoItem
+    let indexInGroup: Int
+    let totalCount: Int
+
+    let onPrevious: () -> Void
+    let onNext: () -> Void
+    let onPreview: () -> Void
+
+    @ObservedObject var viewModel: PhotoCleanupViewModel
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color.white)
+                .shadow(color: .black.opacity(0.12), radius: 10, y: 6)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .stroke(Color(UIColor.systemGray4), lineWidth: 1)
+                )
+
+            ZStack {
+                AssetThumbnailView(
+                    asset: item.asset,
+                    imageManager: viewModel.imageManager,
+                    contentMode: .aspectFit
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black.opacity(0.02))
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+
+                // 组内索引：2 / 3
+                Text("\(indexInGroup + 1) / \(totalCount)")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.black.opacity(0.6))
+                    .clipShape(Capsule())
+                    .overlay(
+                        Capsule().stroke(Color.white.opacity(0.4), lineWidth: 1)
+                    )
+                    .padding(.top, 10)
+                    .padding(.trailing, 10)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+
+                // 左右切换按钮（组内）
+                HStack {
+                    Button(action: onPrevious) {
+                        navCircle(systemImage: "chevron.left")
+                    }
+                    .disabled(indexInGroup == 0)
+                    .opacity(indexInGroup == 0 ? 0.3 : 1.0)
+
+                    Spacer()
+
+                    Button(action: onNext) {
+                        navCircle(systemImage: "chevron.right")
+                    }
+                    .disabled(indexInGroup >= totalCount - 1)
+                    .opacity(indexInGroup >= totalCount - 1 ? 0.3 : 1.0)
+                }
+                .padding(.horizontal, 8)
+
+                // 底部渐变 + 信息 + 放大镜按钮
+                VStack {
+                    Spacer()
+                    LinearGradient(
+                        colors: [Color.black.opacity(0.85), Color.black.opacity(0)],
+                        startPoint: .bottom,
+                        endPoint: .top
+                    )
+                    .frame(height: 110)
+                    .overlay(
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.asset.originalFilename)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: false, vertical: true)
+
+                                Text(fileInfoText(for: item))
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.white.opacity(0.8))
+                            }
+
+                            Spacer()
+
+                            Button(action: onPreview) {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.white.opacity(0.2))
+                                    Image(systemName: "plus.magnifyingglass")
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundColor(.white)
+                                }
+                                .frame(width: 32, height: 32)
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, 10)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                }
+            }
+            .padding(6)
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(3.0 / 4.0, contentMode: .fit)
+        .gesture(
+            DragGesture()
+                .onEnded { value in
+                    let threshold: CGFloat = 40
+                    if value.translation.width > threshold {
+                        onPrevious()
+                    } else if value.translation.width < -threshold {
+                        onNext()
+                    }
+                }
+        )
+    }
+
+    private func navCircle(systemImage: String) -> some View {
+        ZStack {
+            Circle()
+                .fill(Color.white.opacity(0.9))
+                .shadow(color: .black.opacity(0.1), radius: 3, y: 1)
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(.gray)
+        }
+        .frame(width: 32, height: 32)
+    }
+
+    private func fileInfoText(for item: PhotoItem) -> String {
+        var parts: [String] = []
+        parts.append(item.fileSize.fileSizeDescription)
+
+        if item.exposureIsBad {
+            parts.append("曝光较暗/过曝")
+        } else if let blur = item.blurScore, blur < 0.04 {
+            parts.append("可能模糊")
+        }
+
+        return parts.joined(separator: " • ")
+    }
+}
+
+// MARK: - Thumbnail View
+
+/// 缩略图条中的小卡片
+private struct ThumbnailView: View {
+    let item: PhotoItem
+    let isHero: Bool
+    let isRecommended: Bool
+    let imageManager: PHCachingImageManager
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            let size = isHero ? CGSize(width: 56, height: 80) : CGSize(width: 44, height: 64)
+
+            AssetThumbnailView(
+                asset: item.asset,
+                imageManager: imageManager,
+                contentMode: .aspectFill
+            )
+            .frame(width: size.width, height: size.height)
+            .clipped()
+            .grayscale(isHero ? 0.0 : 0.8)
+            .opacity(isHero ? 1.0 : 0.7)
+            .overlay(
+                RoundedRectangle(cornerRadius: isHero ? 12 : 8, style: .continuous)
+                    .stroke(
+                        isHero ? Color("brand-start") : Color(UIColor.systemGray4),
+                        lineWidth: isHero ? 2 : 1
+                    )
+            )
+            .background(Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: isHero ? 12 : 8, style: .continuous))
+            .shadow(color: isHero ? Color.black.opacity(0.2) : Color.clear,
+                    radius: isHero ? 6 : 0,
+                    y: isHero ? 3 : 0)
+
+            if isRecommended {
+                ZStack {
+                    RoundedCorner(radius: 8, corners: [.topRight, .bottomLeft])
+                        .fill(Color.yellow)
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(2)
+                }
+                .frame(width: 14, height: 14)
+            }
+        }
+    }
 }

@@ -15,9 +15,18 @@ struct AssetThumbnailView: View {
             .overlay(
                 Group {
                     if let image = uiImage {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFill()
+                        if contentMode == .aspectFill {
+                            Image(uiImage: image)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .clipped()
+                        } else {
+                            Image(uiImage: image)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
                     } else {
                         Rectangle()
                             .fill(Color.gray.opacity(0.2))
@@ -27,7 +36,6 @@ struct AssetThumbnailView: View {
                     }
                 }
             )
-            .clipped()
             .onAppear {
                 request()
             }

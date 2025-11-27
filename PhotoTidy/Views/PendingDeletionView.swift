@@ -28,11 +28,6 @@ struct PendingDeletionView: View {
                     }
                     
                     Spacer()
-                    
-                    Button("关闭") {
-                        dismiss()
-                    }
-                    .font(.body).foregroundColor(.secondary)
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 12)
@@ -142,7 +137,7 @@ private struct TrashActionsView: View {
                     .font(.footnote)
                     .foregroundColor(.secondary)
                 Spacer()
-                Text(viewModel.pendingDeletionTotalSize.fileSizeDescription)
+                Text(releaseSizeText)
                     .font(.headline)
                     .fontWeight(.semibold)
             }
@@ -152,16 +147,29 @@ private struct TrashActionsView: View {
                     showingConfirmAlert = true
                 }
             }) {
-                HStack {
-                    Image(systemName: "trash.fill")
-                    Text("确认删除")
+                ZStack {
+                    Group {
+                        if viewModel.pendingDeletionItems.isEmpty {
+                            Color.gray.opacity(0.3)
+                        } else {
+                            LinearGradient(
+                                colors: [Color("brand-start"), Color("brand-end")],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                    HStack {
+                        Image(systemName: "trash.fill")
+                        Text("确认删除")
+                    }
+                    .font(.headline.weight(.bold))
                 }
-                .font(.headline.weight(.bold))
                 .frame(maxWidth: .infinity)
                 .frame(height: 55)
-                .background(viewModel.pendingDeletionItems.isEmpty ? Color.gray : Color.black)
                 .foregroundColor(.white)
-                .cornerRadius(16)
             }
             .disabled(viewModel.pendingDeletionItems.isEmpty)
         }
@@ -169,6 +177,12 @@ private struct TrashActionsView: View {
         .padding(.top, 20)
         .padding(.bottom, 34) // Safe area
         .background(.thinMaterial)
+    }
+
+    private var releaseSizeText: String {
+        viewModel.pendingDeletionItems.isEmpty
+        ? "--"
+        : viewModel.pendingDeletionTotalSize.fileSizeDescription
     }
 }
 
