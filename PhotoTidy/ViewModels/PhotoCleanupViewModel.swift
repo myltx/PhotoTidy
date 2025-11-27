@@ -243,8 +243,11 @@ final class PhotoCleanupViewModel: ObservableObject {
                     }
 
                     let progress = Double(index + 1) / Double(total)
-                    DispatchQueue.main.async {
-                        self.analysisProgress = progress
+                    // Throttle UI updates to avoid flooding the main thread
+                    if index % 15 == 0 || index == total - 1 {
+                        DispatchQueue.main.async {
+                            self.analysisProgress = progress
+                        }
                     }
                 }
             }

@@ -6,15 +6,28 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            switch viewModel.authorizationStatus {
-            case .authorized, .limited:
-                MainAppView(viewModel: viewModel)
-            case .denied, .restricted:
-                PermissionDeniedView()
-            case .notDetermined:
-                PermissionRequestView(viewModel: viewModel)
-            @unknown default:
-                Text("未知相册权限状态")
+            // Layer 1: Background color that fills the entire screen
+            Color(UIColor.systemGray6)
+                .ignoresSafeArea()
+
+            // Layer 2: The actual content, which respects safe areas by default
+            ZStack {
+                switch viewModel.authorizationStatus {
+                case .authorized, .limited:
+                    MainAppView(viewModel: viewModel)
+                case .denied, .restricted:
+                    PermissionDeniedView()
+                case .notDetermined:
+                    PermissionRequestView(viewModel: viewModel)
+                @unknown default:
+                    Text("未知相册权限状态")
+                }
+
+                if shouldShowSplash {
+                    SplashLoadingView()
+                        .transition(.opacity)
+                        .zIndex(1)
+                }
             }
         }
         .onAppear {
@@ -22,6 +35,12 @@ struct ContentView: View {
                 viewModel.loadAssets()
             }
         }
+    }
+
+    private var shouldShowSplash: Bool {
+        (viewModel.authorizationStatus == .authorized || viewModel.authorizationStatus == .limited) &&
+        viewModel.isLoading &&
+        viewModel.items.isEmpty
     }
 }
 
@@ -42,12 +61,6 @@ struct MainAppView: View {
             }
 
             BottomNavBar(viewModel: viewModel)
-
-            if viewModel.isLoading && viewModel.items.isEmpty {
-                SplashLoadingView()
-                    .transition(.opacity)
-                    .zIndex(1)
-            }
         }
         .animation(.default, value: viewModel.currentTab)
         .fullScreenCover(isPresented: $viewModel.isShowingCleaner) {
