@@ -2,6 +2,12 @@
 import Foundation
 import Photos
 
+/// 相似分组类型：用于区分“重复”与“轻微差异”
+enum SimilarityGroupKind {
+    case duplicate      // 几乎完全相同的重复照片
+    case similar        // 构图/内容相似，存在轻微差异
+}
+
 /// 单张照片/视频的元数据 + 分析结果
 struct PhotoItem: Identifiable, Hashable {
     let id: String            // PHAsset.localIdentifier
@@ -15,12 +21,14 @@ struct PhotoItem: Identifiable, Hashable {
     var isScreenshot: Bool
 
     // 分析结果
+    var pHash: UInt64?              // 感知哈希（64bit）
     var blurScore: Double?        // 清晰度评分（越大越清晰）
     var exposureIsBad: Bool       // 曝光是否异常
     var isBlurredOrShaky: Bool    // 是否模糊/抖动
     var isDocumentLike: Bool      // 是否疑似文档照片
     var isLargeFile: Bool         // 是否大文件
     var similarGroupId: Int?      // 相似组 ID
+    var similarityKind: SimilarityGroupKind? // 相似组类型
 
     // UI 状态
     var markedForDeletion: Bool = false

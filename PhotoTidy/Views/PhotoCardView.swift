@@ -7,7 +7,8 @@ struct PhotoCardView: View {
 
     var body: some View {
         AssetThumbnailView(asset: item.asset, imageManager: viewModel.imageManager, contentMode: .aspectFill)
-            .aspectRatio(1, contentMode: .fill)
+            // 纵向比例更接近设计稿中的大图卡片
+            .aspectRatio(3.0 / 4.0, contentMode: .fill)
             .background(Color(UIColor.secondarySystemBackground))
             .cornerRadius(24)
             .clipped()
@@ -33,6 +34,11 @@ struct PhotoCardView: View {
                         .padding(16)
                 }
                 , alignment: .top
+            )
+            .overlay(
+                // 轻微白色描边，让卡片从背景中「抠」出来
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.white.opacity(0.9), lineWidth: 1)
             )
     }
 }

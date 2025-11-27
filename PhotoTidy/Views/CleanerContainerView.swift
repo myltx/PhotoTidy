@@ -5,26 +5,40 @@ struct CleanerContainerView: View {
     @State private var showTrashSheet = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            CleanerHeader(viewModel: viewModel, showTrashSheet: $showTrashSheet)
-            
-            Spacer()
+        ZStack {
+            // 背景做成浅灰到白色的过渡，贴近高保真设计的「phone-frame」感觉
+            LinearGradient(
+                colors: [Color(UIColor.systemGray6), Color(UIColor.systemBackground)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
 
-            if viewModel.currentItem != nil {
-                CardStackView(viewModel: viewModel)
-                    .frame(height: 480)
-                    .padding(.horizontal, 20)
-            } else {
-                NoMorePhotosView()
+            VStack(spacing: 0) {
+                CleanerHeader(viewModel: viewModel, showTrashSheet: $showTrashSheet)
+
+                if viewModel.currentItem != nil {
+                    VStack(spacing: 12) {
+                        SwipeDateHeaderView(date: viewModel.currentItem?.creationDate)
+
+                        CardStackView(viewModel: viewModel)
+                            .frame(height: 480)
+                            .padding(.horizontal, 20)
+                    }
+                    .padding(.top, 8)
+                } else {
+                    Spacer()
+                    NoMorePhotosView()
+                    Spacer()
+                }
+
+                Spacer()
+
+                PhotoMetaView(viewModel: viewModel)
+
+                CleanerFooter(viewModel: viewModel)
             }
-            
-            Spacer()
-            
-            PhotoMetaView(viewModel: viewModel)
-
-            CleanerFooter(viewModel: viewModel)
         }
-        .background(Color(UIColor.systemBackground))
         .sheet(isPresented: $showTrashSheet) {
             PendingDeletionView(viewModel: viewModel)
                 .presentationDetents([.fraction(0.6), .large])
@@ -64,6 +78,59 @@ private struct PhotoMetaView: View {
         }
         .frame(height: 60)
         .opacity(viewModel.currentItem != nil ? 1 : 0)
+    }
+}
+
+/// 顶部日期栏：显示「2023年 10月」+「昨天」类似文案
+private struct SwipeDateHeaderView: View {
+    let date: Date?
+
+    private var monthYearText: String {
+        guard let date = date else { return "全相册" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy年 M月"
+        return formatter.string(from: date)
+    }
+
+    private var relativeDayText: String {
+        guard let date = date else { return "" }
+        let cal = Calendar.current
+        if cal.isDateInToday(date) {
+            return "今天"
+        } else if cal.isDateInYesterday(date) {
+            return "昨天"
+        } else {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "zh_CN")
+            formatter.dateFormat = "M月d日"
+            return formatter.string(from: date)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(monthYearText)
+                .font(.headline.weight(.bold))
+                .foregroundColor(.primary)
+            if !relativeDayText.isEmpty {
+                Text(relativeDayText)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .textCase(.uppercase)
+                    .tracking(1.2)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 12)
+        .padding(.bottom, 6)
+        .background(
+            LinearGradient(
+                colors: [Color(UIColor.systemGray6), Color.clear],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
     }
 }
 
