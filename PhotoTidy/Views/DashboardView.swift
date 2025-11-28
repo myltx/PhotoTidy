@@ -24,7 +24,8 @@ struct DashboardView: View {
             }
             .background(Color(UIColor.systemGroupedBackground))
             .navigationTitle("首页")
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.clear, for: .navigationBar)
+            .toolbar(.hidden, for: .navigationBar)
         }
     }
 }
