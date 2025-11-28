@@ -1,4 +1,5 @@
 import SwiftUI
+import Photos
 
 struct SettingsView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
@@ -34,6 +35,21 @@ struct SettingsView: View {
 }
 
 private extension SettingsView {
+    private var authorizationStatusText: String {
+        switch viewModel.authorizationStatus {
+        case .authorized:
+            return "所有照片"
+        case .limited:
+            return "部分照片"
+        case .denied, .restricted:
+            return "已拒绝"
+        case .notDetermined:
+            return "待授权"
+        @unknown default:
+            return "未知"
+        }
+    }
+
     var proCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -90,6 +106,9 @@ private extension SettingsView {
                     .padding(.horizontal)
                     .padding(.vertical, 16)
                 Divider()
+                permissionStatusRow
+                    .padding()
+                Divider()
                 settingRow(icon: "questionmark.circle", title: "帮助与反馈", detail: nil, showChevron: true)
             }
             .background(Color(UIColor.systemBackground))
@@ -112,6 +131,27 @@ private extension SettingsView {
             }
             .pickerStyle(.segmented)
         }
+    }
+    
+    private var permissionStatusRow: some View {
+        Button(action: {
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url)
+            }
+        }) {
+            HStack {
+                Label("照片访问权限", systemImage: "photo.on.rectangle.angled")
+                    .foregroundColor(.primary)
+                Spacer()
+                Text(authorizationStatusText)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     func settingRow(icon: String, title: String, detail: String?, showChevron: Bool = false) -> some View {

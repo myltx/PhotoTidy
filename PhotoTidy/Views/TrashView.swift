@@ -4,6 +4,7 @@ import Photos
 struct TrashView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
     @State private var showingConfirmAlert = false
+    @State private var showPermissionEducationAlert = false
     @State private var isDeleting = false
     @State private var deleteError: Error?
 
@@ -18,7 +19,7 @@ struct TrashView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .bottom) {
                 Color(UIColor.systemGray6).ignoresSafeArea()
 
                 ScrollView(.vertical, showsIndicators: false) {
@@ -42,45 +43,53 @@ struct TrashView: View {
                     }
                     .padding(.horizontal, 24)
                     .padding(.top, 16)
-                    .padding(.bottom, 32)
+                    .padding(.bottom, 150)
                 }
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                confirmSection
+
+                if !items.isEmpty {
+                    floatingConfirmButton
+                        .padding(.bottom, 65)
+                }
             }
             .navigationTitle("待删区")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("清空") {
+                    Button {
                         items.forEach { viewModel.removeFromPending($0) }
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
                     }
+                    .disabled(items.isEmpty)
                 }
             }
         }
         .alert("确认删除这些照片？", isPresented: $showingConfirmAlert) {
             Button("取消", role: .cancel) {}
             Button("移至“最近删除”", role: .destructive) {
-                startDeletion()
+                initiateDeletion()
             }
         } message: {
             Text("这些照片将移动到系统“最近删除”相册。30 天内可在“照片 > 最近删除”中恢复或彻底删除。")
+        }
+        .alert("需要完整照片权限", isPresented: $showPermissionEducationAlert) {
+            Button("继续删除", role: .destructive) {
+                startDeletion()
+            }
+            Button("前往设置") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("由于您仅授予了“部分照片”权限，系统会在删除时再次向您确认。您可以在“设置”中开启“所有照片”权限以简化此流程。")
         }
         .alert("删除失败", isPresented: .constant(deleteError != nil), presenting: deleteError) { _ in
             Button("好的") { deleteError = nil }
         } message: { error in
             Text(error.localizedDescription)
         }
-    }
-
-    private var confirmSection: some View {
-        VStack(spacing: 12) {
-            confirmButton
-        }
-        .padding(.horizontal, 24)
-        .padding(.top, 12)
-        .padding(.bottom, 24)
-        .background(Color.clear)
     }
 
     private var summary: some View {
@@ -105,47 +114,32 @@ struct TrashView: View {
         .padding(.top, 80)
     }
 
-    private var confirmButton: some View {
-        let isDisabled = items.isEmpty || isDeleting
-        return Button(action: {
-            if !isDisabled {
-                showingConfirmAlert = true
-            }
+    private var floatingConfirmButton: some View {
+        Button(action: {
+            showingConfirmAlert = true
         }) {
-            ZStack {
-                Group {
-                    if isDisabled {
-                        Color.gray.opacity(0.3)
-                    } else {
-                        LinearGradient(
-                            colors: [Color("brand-start"), Color("brand-end")],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    }
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-
-                HStack(spacing: 8) {
-                    Image(systemName: "trash.fill")
-                        .font(.system(size: 16, weight: .bold))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(isDeleting ? "正在删除…" : "确认删除")
-                            .font(.system(size: 15, weight: .bold))
-                        Text("释放 \(releaseSizeText)")
-                            .font(.system(size: 11))
-                            .foregroundColor(.white.opacity(0.7))
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .bold))
-                }
-                .padding(.horizontal, 18)
+            HStack {
+                Image(systemName: "trash.fill")
+                Text("确认删除 (\(items.count))")
             }
-            .frame(height: 56)
+            .font(.headline.weight(.bold))
+            .padding()
+            .frame(maxWidth: .infinity)
+            .background(Color("brand-start"))
             .foregroundColor(.white)
+            .cornerRadius(16)
+            .shadow(color: Color("brand-start").opacity(0.3), radius: 10, y: 5)
         }
-        .disabled(isDisabled)
+        .padding(.horizontal, 24)
+        .disabled(items.isEmpty || isDeleting)
+    }
+    
+    private func initiateDeletion() {
+        if viewModel.authorizationStatus == .limited {
+            showPermissionEducationAlert = true
+        } else {
+            startDeletion()
+        }
     }
 
     private func startDeletion() {
