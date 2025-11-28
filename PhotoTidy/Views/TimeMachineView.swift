@@ -127,6 +127,10 @@ struct TimeMachineView: View {
                                     },
                                     monthlyCount: currentMonthItemCount
                                 )
+                                .padding(.horizontal, 20)
+                                .padding(.top, 20)
+                                .padding(.bottom, 12)
+                                .background(.thinMaterial)
                             }
                         }
                     }
@@ -188,12 +192,13 @@ private struct TimeMachineHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
+                Spacer()
                 Text("时光机")
                     .font(.system(size: 28, weight: .bold))
-                    .foregroundColor(.primary)
-
+                    .foregroundColor(.clear)
                 Spacer()
-
+            }
+            .overlay(alignment: .trailing) {
                 Menu {
                     Button("全部年份") {
                         onResetYear()
