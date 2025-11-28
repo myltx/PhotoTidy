@@ -55,11 +55,11 @@ struct TrashView: View {
         }
         .alert("确认删除这些照片？", isPresented: $showingConfirmAlert) {
             Button("取消", role: .cancel) {}
-            Button("永久删除", role: .destructive) {
+            Button("移至“最近删除”", role: .destructive) {
                 startDeletion()
             }
         } message: {
-            Text("将从系统相册中永久删除这些照片或视频，此操作无法恢复。")
+            Text("这些照片将移动到系统“最近删除”相册。30 天内可在“照片 > 最近删除”中恢复或彻底删除。")
         }
         .alert("删除失败", isPresented: .constant(deleteError != nil), presenting: deleteError) { _ in
             Button("好的") { deleteError = nil }

@@ -93,6 +93,12 @@ struct SuccessSummaryView: View {
                 )
                 .padding(.horizontal, 12)
 
+                Text("已将所选照片移至系统“最近删除”。30 天内可在“照片 > 最近删除”恢复或彻底删除。")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(Color.white.opacity(0.85))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 8)
+
                 Spacer()
 
                 Button {
