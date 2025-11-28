@@ -5,51 +5,47 @@ struct CleanerContainerView: View {
     @State private var showTrashSheet = false
 
     var body: some View {
-        ZStack {
-            Color(UIColor.systemBackground)
-                .ignoresSafeArea()
+        VStack(spacing: 0) {
+            topBar
 
-            VStack(spacing: 0) {
-                topBar
-
-                if viewModel.isAnalyzing {
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                            .scaleEffect(0.6)
-                        Text("AI 正在分析中…")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.bottom, 8)
+            if viewModel.isAnalyzing {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .scaleEffect(0.6)
+                    Text("AI 正在分析中…")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
                 }
-
-                if viewModel.currentItem != nil {
-                    VStack(spacing: 12) {
-                        SwipeDateHeaderView(date: viewModel.currentItem?.creationDate)
-
-                        CardStackView(viewModel: viewModel)
-                            .frame(height: 480)
-                            .padding(.horizontal, 20)
-                    }
-                    .padding(.top, 8)
-                } else if viewModel.isLoading {
-                    Spacer()
-                    LoadingPhotosView()
-                    Spacer()
-                } else {
-                    Spacer()
-                    NoMorePhotosView()
-                    Spacer()
-                }
-
-                Spacer()
-
-                PhotoMetaView(viewModel: viewModel)
-
-                CleanerFooter(viewModel: viewModel)
+                .padding(.bottom, 8)
             }
+
+            if viewModel.currentItem != nil {
+                VStack(spacing: 12) {
+                    SwipeDateHeaderView(date: viewModel.currentItem?.creationDate)
+
+                    CardStackView(viewModel: viewModel)
+                        .frame(height: 480)
+                        .padding(.horizontal, 20)
+                }
+                .padding(.top, 8)
+            } else if viewModel.isLoading {
+                Spacer()
+                LoadingPhotosView()
+                Spacer()
+            } else {
+                Spacer()
+                NoMorePhotosView()
+                Spacer()
+            }
+
+            Spacer()
+
+            PhotoMetaView(viewModel: viewModel)
+
+            CleanerFooter(viewModel: viewModel)
         }
+        .background(Color(UIColor.systemBackground).ignoresSafeArea())
         .sheet(isPresented: $showTrashSheet) {
             PendingDeletionView(viewModel: viewModel)
                 .presentationDetents([.fraction(0.6), .large])

@@ -8,24 +8,25 @@ struct DashboardView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 24) {
-                headerSection
-                heroCleanerCard
-                smartCleanupTitle
-                smartCleanupGrid
-                Spacer(minLength: 40)
+        NavigationStack {
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 24) {
+                    headerSection
+                    heroCleanerCard
+                    smartCleanupTitle
+                    smartCleanupGrid
+                    Spacer(minLength: 40)
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 16)
+                .padding(.bottom, 32)
             }
-            .padding(.horizontal, 24)
-            .padding(.top, 24)
-            .padding(.bottom, 32)
-        }
-        .background(Color(UIColor.systemGroupedBackground))
-        .safeAreaInset(edge: .top) {
-            Spacer().frame(height: 0)
-        }
-        .safeAreaInset(edge: .bottom) {
-            Spacer().frame(height: 65) // Padding for floating tab bar
+            .background(Color(UIColor.systemGroupedBackground))
+            .safeAreaInset(edge: .bottom) {
+                Spacer().frame(height: 65) // Padding for floating tab bar
+            }
+            .navigationTitle("首页")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }
@@ -35,9 +36,9 @@ private extension DashboardView {
     var headerSection: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("相册清理")
-                    .font(.title2).bold()
-                    .foregroundColor(.primary)
+                Text("存储概览")
+                    .font(.headline)
+                    .foregroundColor(.secondary)
                 Text("本机存储已用 82%")
                     .font(.caption)
                     .foregroundColor(.secondary)

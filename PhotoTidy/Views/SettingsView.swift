@@ -4,18 +4,29 @@ struct SettingsView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
 
     var body: some View {
-        GeometryReader { proxy in
+        NavigationStack {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 24) {
-                    header
                     proCard
                     cleanupPreferences
                     generalSection
                     helperSection
                 }
                 .padding(.horizontal, 24)
-                .padding(.top, 32 + proxy.safeAreaInsets.top)
+                .padding(.top, 16)
                 .padding(.bottom, 120)
+            }
+            .background(Color.clear)
+            .navigationTitle("设置")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {}) {
+                        Image(systemName: "person.crop.circle")
+                            .imageScale(.large)
+                    }
+                    .foregroundColor(.primary)
+                }
             }
         }
         .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
@@ -23,14 +34,6 @@ struct SettingsView: View {
 }
 
 private extension SettingsView {
-    var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("设置").font(.largeTitle).bold()
-            Text("自定义你的清理偏好").foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     var proCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {

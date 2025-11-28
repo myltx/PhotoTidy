@@ -17,40 +17,50 @@ struct TrashView: View {
     ]
 
     var body: some View {
-        ZStack {
-            Color(UIColor.systemGray6).ignoresSafeArea()
+        NavigationStack {
+            ZStack {
+                Color(UIColor.systemGray6).ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                header
-                summary
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 12)
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 16) {
+                        summary
 
-                if items.isEmpty {
-                    Spacer()
-                    emptyState
-                    Spacer()
-                } else {
-                    ScrollView {
-                        LazyVGrid(columns: gridColumns, spacing: 12) {
-                            let previewItems = Array(items.prefix(3))
-                            ForEach(previewItems, id: \.id) { item in
-                                TrashPreviewCell(item: item, viewModel: viewModel)
+                        if items.isEmpty {
+                            emptyState
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 80)
+                        } else {
+                            LazyVGrid(columns: gridColumns, spacing: 12) {
+                                let previewItems = Array(items.prefix(3))
+                                ForEach(previewItems, id: \.id) { item in
+                                    TrashPreviewCell(item: item, viewModel: viewModel)
+                                }
+
+                                if items.count > previewItems.count {
+                                    plusMoreTile(extra: items.count - previewItems.count)
+                                }
                             }
-
-                            if items.count > previewItems.count {
-                                plusMoreTile(extra: items.count - previewItems.count)
-                            }
+                            .padding(.top, 8)
                         }
-                        .padding(.horizontal, 24)
-                        .padding(.top, 8)
+
+                        Spacer(minLength: 40)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 16)
+                    .padding(.bottom, 32)
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                confirmSection
+            }
+            .navigationTitle("待删区")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("清空") {
+                        items.forEach { viewModel.removeFromPending($0) }
                     }
                 }
-
-                confirmButton
-                    .padding(.horizontal, 24)
-                    .padding(.top, 12)
-                    .padding(.bottom, 24)
             }
         }
         .alert("确认删除这些照片？", isPresented: $showingConfirmAlert) {
@@ -68,26 +78,14 @@ struct TrashView: View {
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("待删除")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundColor(.primary)
-                Spacer()
-                Button("清空") {
-                    items.forEach { viewModel.removeFromPending($0) }
-                }
-                .font(.system(size: 12, weight: .bold))
-                .foregroundColor(Color("brand-start"))
-            }
-            Text("共 \(items.count) 张")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
+    private var confirmSection: some View {
+        VStack(spacing: 12) {
+            confirmButton
         }
         .padding(.horizontal, 24)
-        .padding(.top, 24)
-        .padding(.bottom, 8)
+        .padding(.top, 12)
+        .padding(.bottom, 65)
+        .background(Color.clear)
     }
 
     private var summary: some View {
@@ -97,6 +95,7 @@ struct TrashView: View {
                 .foregroundColor(.secondary)
             Spacer()
         }
+        .padding(.bottom, 4)
     }
 
     private var emptyState: some View {

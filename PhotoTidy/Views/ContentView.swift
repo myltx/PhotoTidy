@@ -51,14 +51,12 @@ struct MainAppView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            VStack(spacing: 0) {
-                if viewModel.currentTab == .dashboard {
-                    DashboardView(viewModel: viewModel)
-                } else if viewModel.currentTab == .trash {
-                    TrashView(viewModel: viewModel)
-                } else {
-                    SettingsView(viewModel: viewModel)
-                }
+            if viewModel.currentTab == .dashboard {
+                DashboardView(viewModel: viewModel)
+            } else if viewModel.currentTab == .trash {
+                TrashView(viewModel: viewModel)
+            } else {
+                SettingsView(viewModel: viewModel)
             }
 
             BottomNavBar(viewModel: viewModel)
