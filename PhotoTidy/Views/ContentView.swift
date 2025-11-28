@@ -48,36 +48,28 @@ struct ContentView: View {
 // MARK: - Main App View Structure
 struct MainAppView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
-    private let tabBarHeight: CGFloat = 65
 
     var body: some View {
-        GeometryReader { proxy in
-            let safeBottom = proxy.safeAreaInsets.bottom
-            let bottomInset = tabBarHeight + max(safeBottom - 10, 6)
-            ZStack(alignment: .bottom) {
-                Group {
-                    switch viewModel.currentTab {
-                    case .dashboard:
-                        DashboardView(viewModel: viewModel)
-                    case .trash:
-                        TrashView(viewModel: viewModel)
-                    case .settings:
-                        SettingsView(viewModel: viewModel)
-                    }
+        TabView(selection: $viewModel.currentTab) {
+            DashboardTab(viewModel: viewModel)
+                .tabItem {
+                    Label("首页", systemImage: "house.fill")
                 }
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    Color.clear
-                        .frame(height: bottomInset)
-                        .allowsHitTesting(false)
-                }
+                .tag(AppView.dashboard)
 
-                BottomNavBar(viewModel: viewModel)
-                    .padding(.top, 6)
-                    .padding(.bottom, max(safeBottom - 12, 4))
-            }
-            .ignoresSafeArea(edges: .bottom)
+            TimeMachineTab(viewModel: viewModel)
+                .tabItem {
+                    Label("时光机", systemImage: "clock.arrow.circlepath")
+                }
+                .tag(AppView.timeMachine)
+
+            SettingsView(viewModel: viewModel)
+                .tabItem {
+                    Label("设置", systemImage: "gearshape.fill")
+                }
+                .tag(AppView.settings)
         }
-        .animation(.default, value: viewModel.currentTab)
+        .tint(Color("brand-start"))
         .fullScreenCover(isPresented: $viewModel.isShowingCleaner) {
             CleanerContainerView(viewModel: viewModel)
         }
@@ -97,6 +89,28 @@ struct MainAppView: View {
                 SuccessSummaryView(viewModel: viewModel)
             }
         }
+    }
+}
+
+private struct DashboardTab: View {
+    @ObservedObject var viewModel: PhotoCleanupViewModel
+    @State private var showingTrash = false
+
+    var body: some View {
+        DashboardView(viewModel: viewModel, onShowTrash: {
+            showingTrash = true
+        })
+        .sheet(isPresented: $showingTrash) {
+            TrashView(viewModel: viewModel)
+        }
+    }
+}
+
+private struct TimeMachineTab: View {
+    @ObservedObject var viewModel: PhotoCleanupViewModel
+
+    var body: some View {
+        TimeMachineView(viewModel: viewModel)
     }
 }
 
@@ -166,51 +180,4 @@ struct PermissionDeniedView: View {
 }
 
 
-// MARK: - Bottom Navigation Bar
-struct BottomNavBar: View {
-    @ObservedObject var viewModel: PhotoCleanupViewModel
-
-    var body: some View {
-        HStack {
-            Spacer()
-            NavButton(icon: "house.fill", text: "首页", isActive: viewModel.currentTab == .dashboard) {
-                viewModel.currentTab = .dashboard
-            }
-            Spacer()
-            NavButton(icon: "trash.fill", text: "待删区", isActive: viewModel.currentTab == .trash) {
-                viewModel.currentTab = .trash
-            }
-            Spacer()
-            NavButton(icon: "gearshape.fill", text: "设置", isActive: viewModel.currentTab == .settings) {
-                viewModel.currentTab = .settings
-            }
-            Spacer()
-        }
-        .frame(height: 65)
-        .background(.bar)
-        .cornerRadius(24)
-        .padding(.horizontal)
-        .shadow(color: .black.opacity(0.1), radius: 10, y: -5)
-    }
-}
-
-// MARK: - Navigation Button
-struct NavButton: View {
-    let icon: String
-    let text: String
-    let isActive: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 22))
-                    .foregroundColor(isActive ? Color("brand-start") : .gray)
-                Text(text)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(isActive ? Color("brand-start") : .gray)
-            }
-        }
-    }
-}
+// BottomNavBar/ NavButton removed in favor of native TabView

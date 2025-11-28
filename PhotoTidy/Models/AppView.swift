@@ -1,8 +1,8 @@
 import Foundation
 
 /// Represents the main tabs in the application's UI.
-enum AppView {
+enum AppView: Hashable {
     case dashboard
-    case trash
+    case timeMachine
     case settings
 }

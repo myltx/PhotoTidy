@@ -6,6 +6,7 @@ import SwiftUI
 /// - 下方四个「智能整理」分类入口
 struct DashboardView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
+    var onShowTrash: (() -> Void)? = nil
 
     var body: some View {
         NavigationStack {
@@ -24,6 +25,29 @@ struct DashboardView: View {
             .background(Color(UIColor.systemGroupedBackground))
             .navigationTitle("首页")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        onShowTrash?()
+                    } label: {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "trash")
+                                .imageScale(.medium)
+                            if viewModel.pendingDeletionItems.count > 0 {
+                                Text("\(min(viewModel.pendingDeletionItems.count, 99))")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 2)
+                                    .background(Color("brand-start"))
+                                    .clipShape(Capsule())
+                                    .offset(x: 6, y: -6)
+                            }
+                        }
+                    }
+                    .accessibilityLabel("打开待删区")
+                }
+            }
         }
     }
 }
