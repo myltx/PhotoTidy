@@ -72,13 +72,18 @@ struct TimeMachineView: View {
         return allMonths.filter { calendar.component(.year, from: $0.date) == selectedYear }
     }
 
+    private var visibleMonths: [TimelineMonth] {
+        let months = filteredMonths
+        return months.isEmpty ? allMonths : months
+    }
+
     private var availableYears: [Int] {
         Array(Set(allMonths.map { calendar.component(.year, from: $0.date) })).sorted(by: >)
     }
 
     private var displayYearText: String {
         if let selectedYear { return "\(selectedYear)年" }
-        if let first = filteredMonths.first {
+        if let first = visibleMonths.first {
             return "\(calendar.component(.year, from: first.date))年"
         }
         let currentYear = calendar.component(.year, from: Date())
@@ -103,7 +108,7 @@ struct TimeMachineView: View {
                         LazyVStack(alignment: .leading, spacing: 20, pinnedViews: [.sectionHeaders]) {
                             Section {
                                 VStack(spacing: 28) {
-                                    ForEach(filteredMonths) { month in
+                                    ForEach(visibleMonths) { month in
                                         MonthCalendarView(
                                             month: month,
                                             onSelectDay: { day in
@@ -125,7 +130,7 @@ struct TimeMachineView: View {
                                     onResetYear: {
                                         selectedYear = nil
                                     },
-                                    featuredMonth: filteredMonths.first,
+                                    featuredMonth: visibleMonths.first,
                                     suggestedCount: viewModel.pendingDeletionItems.count
                                 )
                                 .padding(.horizontal, 20)
