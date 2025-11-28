@@ -52,9 +52,9 @@ private extension DashboardView {
                         .resizable()
                         .scaledToFill()
                         .frame(width: 52, height: 52)
-                        .background(Color.white)
+                        .background(cardBackgroundColor)
                         .clipShape(Circle())
-                        .overlay(Circle().stroke(Color.white, lineWidth: 3))
+                        .overlay(Circle().stroke(cardBackgroundColor, lineWidth: 3))
                         .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
 
                     VStack(alignment: .leading, spacing: 2) {
@@ -74,7 +74,7 @@ private extension DashboardView {
                 } label: {
                     ZStack {
                         Circle()
-                            .fill(Color.white)
+                            .fill(cardBackgroundColor)
                             .frame(width: 46, height: 46)
                             .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
                         Image(systemName: "trash")
@@ -279,7 +279,7 @@ private extension DashboardView {
         .padding(18)
         .background(
             RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(Color.white)
+                .fill(cardBackgroundColor)
                 .overlay(
                     RoundedRectangle(cornerRadius: 28, style: .continuous)
                         .stroke(Color.black.opacity(0.04), lineWidth: 1)
@@ -347,6 +347,10 @@ private extension DashboardView {
             return "AI 正在分析中…"
         }
         return nil
+    }
+
+    private var cardBackgroundColor: Color {
+        Color(UIColor.systemBackground)
     }
 
     var blurredBackground: some View {

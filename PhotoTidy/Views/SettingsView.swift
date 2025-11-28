@@ -120,7 +120,7 @@ private extension SettingsView {
                     .font(.system(size: 15, weight: .bold))
                     .frame(maxWidth: .infinity)
                     .frame(height: 48)
-                    .background(Color.white)
+                    .background(elevatedButtonBackground)
                     .foregroundColor(Color("brand-start"))
                     .cornerRadius(16)
                     .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
@@ -152,7 +152,7 @@ private extension SettingsView {
                     isOn: $confirmDeletion
                 )
             }
-            .background(Color.white)
+            .background(sectionBackground)
             .cornerRadius(24)
             .overlay(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -176,7 +176,7 @@ private extension SettingsView {
                 Divider().padding(.leading, 56)
                 helpTile
             }
-            .background(Color.white)
+            .background(sectionBackground)
             .cornerRadius(24)
             .overlay(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -286,7 +286,7 @@ private extension SettingsView {
                 .font(.system(size: 12, weight: viewModel.selectedTheme == theme ? .bold : .regular))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
-                .background(viewModel.selectedTheme == theme ? Color.white : Color.clear)
+                .background(viewModel.selectedTheme == theme ? elevatedButtonBackground : Color.clear)
                 .foregroundColor(viewModel.selectedTheme == theme ? .primary : .secondary)
                 .cornerRadius(14)
                 .shadow(color: viewModel.selectedTheme == theme ? Color.black.opacity(0.1) : .clear, radius: 4, y: 2)
@@ -302,6 +302,14 @@ private extension SettingsView {
         case .notDetermined: return "待授权"
         @unknown default: return "未知"
         }
+    }
+
+    var sectionBackground: Color {
+        Color(UIColor.secondarySystemBackground)
+    }
+
+    var elevatedButtonBackground: Color {
+        Color(UIColor.systemBackground)
     }
 }
 
@@ -341,7 +349,7 @@ private struct SettingsToggleStyle: ToggleStyle {
                 .fill(configuration.isOn ? Color("brand-start") : Color(UIColor.systemGray4))
                 .frame(width: 48, height: 26)
             Circle()
-                .fill(Color.white)
+                .fill(Color(UIColor.systemBackground))
                 .frame(width: 24, height: 24)
                 .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
                 .padding(1)

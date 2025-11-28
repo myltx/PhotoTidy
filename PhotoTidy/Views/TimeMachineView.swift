@@ -179,7 +179,7 @@ private struct TimeMachineHeader: View {
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 6)
-                    .background(Color.white)
+                    .background(headerButtonBackground)
                     .clipShape(Capsule())
                     .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
                 }
@@ -188,6 +188,10 @@ private struct TimeMachineHeader: View {
 
             HighlightCard(summary: summary)
         }
+    }
+
+    private var headerButtonBackground: Color {
+        Color(UIColor.systemBackground)
     }
 }
 
@@ -339,7 +343,7 @@ private struct MonthCard: View {
         .padding(18)
         .background(
             RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .fill(Color.white.opacity(hasPending ? 1 : 0.85))
+                .fill(hasPending ? Color(UIColor.systemBackground) : Color(UIColor.secondarySystemBackground))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 26, style: .continuous)
