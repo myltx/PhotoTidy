@@ -69,18 +69,11 @@ private extension SettingsView {
 
     var header: some View {
         HStack {
-            Text("设置")
-                .font(.system(size: 30, weight: .bold))
-                .foregroundColor(.primary)
             Spacer()
-            Image("duck")
-                .resizable()
-                .scaledToFill()
-                .frame(width: 44, height: 44)
-                .background(Color(UIColor.systemGray5))
-                .clipShape(Circle())
-                .overlay(Circle().stroke(Color.white, lineWidth: 2))
-                .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+            Text("设置")
+                .font(.system(size: 28, weight: .bold))
+                .foregroundColor(.clear)
+            Spacer()
         }
     }
 
