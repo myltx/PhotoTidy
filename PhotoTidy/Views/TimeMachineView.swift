@@ -5,6 +5,7 @@ struct TimeMachineView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
     @State private var selectedYear: Int?
     @State private var selectedDay: TimelineDay?
+    @State private var showingTrash = false
 
     private let calendar = Calendar.current
 
@@ -129,10 +130,29 @@ struct TimeMachineView: View {
                             }
                         }
                     }
-                    .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
+                    .background(
+                        ZStack {
+                            Image("all_album_bg")
+                                .resizable()
+                                .scaledToFill()
+                                .opacity(0.15)
+                                .blur(radius: 10)
+                                .ignoresSafeArea()
+                            Color(UIColor.systemGroupedBackground)
+                                .opacity(0.85)
+                                .ignoresSafeArea()
+                        }
+                    )
                     .sheet(item: $selectedDay) { day in
-                        TimeMachineDayDetailView(day: day, viewModel: viewModel)
+                        TimeMachineDayDetailView(day: day, viewModel: viewModel, onShowTrash: {
+                            showingTrash = true
+                        })
                             .presentationDetents([.large])
+                    }
+                    .sheet(isPresented: $showingTrash) {
+                        TrashView(viewModel: viewModel)
+                            .presentationDetents([.fraction(0.5), .large])
+                            .presentationDragIndicator(.visible)
                     }
                 }
             }
@@ -245,6 +265,12 @@ private struct MonthCalendarView: View {
     var onSelectDay: (TimelineDay) -> Void
 
     private let columns: [GridItem] = Array(repeating: .init(.flexible(), spacing: 6), count: 7)
+    private let calendar = Calendar.current
+    
+    private var yearText: String {
+        let year = calendar.component(.year, from: month.date)
+        return "\(year)"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -279,6 +305,17 @@ private struct MonthCalendarView: View {
             }
         }
         .padding(.horizontal, 24)
+        .padding(.vertical, 12)
+        .background(
+            ZStack(alignment: .topTrailing) {
+                Text(yearText)
+                    .font(.system(size: 92, weight: .black))
+                    .foregroundColor(Color.primary.opacity(0.04))
+                    .rotationEffect(.degrees(-6))
+                    .padding(.top, -10)
+                    .padding(.trailing, -10)
+            }
+        )
     }
 }
 
@@ -357,6 +394,7 @@ private struct TimelineDay: Identifiable, Hashable {
 private struct TimeMachineDayDetailView: View {
     let day: TimelineDay
     @ObservedObject var viewModel: PhotoCleanupViewModel
+    var onShowTrash: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @State private var previewItem: PhotoItem?
 
@@ -387,7 +425,35 @@ private struct TimeMachineDayDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("关闭") { dismiss() }
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "arrow.left")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(.primary)
+                            .frame(width: 36, height: 36)
+                            .background(Color(UIColor.systemBackground))
+                            .clipShape(Circle())
+                            .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+                    }
+                    .buttonStyle(.plain)
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        dismiss()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            onShowTrash?()
+                        }
+                    } label: {
+                        Circle()
+                            .fill(Color(UIColor.systemGray6))
+                            .frame(width: 38, height: 38)
+                            .overlay(
+                                Image(systemName: "trash")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(Color("brand-start"))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("打开待删区")
                 }
             }
         }

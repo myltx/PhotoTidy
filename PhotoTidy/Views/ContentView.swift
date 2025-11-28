@@ -102,6 +102,8 @@ private struct DashboardTab: View {
         })
         .sheet(isPresented: $showingTrash) {
             TrashView(viewModel: viewModel)
+                .presentationDetents([.fraction(0.5), .large])
+                .presentationDragIndicator(.visible)
         }
     }
 }

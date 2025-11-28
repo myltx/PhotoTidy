@@ -4,9 +4,11 @@ import Photos
 struct TrashView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
     @State private var showingConfirmAlert = false
+    @State private var showingClearAllAlert = false
     @State private var showPermissionEducationAlert = false
     @State private var isDeleting = false
     @State private var deleteError: Error?
+    @Environment(\.dismiss) private var dismiss
 
     private var items: [PhotoItem] { viewModel.pendingDeletionItems }
     private var totalSizeText: String { viewModel.pendingDeletionTotalSize.fileSizeDescription }
@@ -48,21 +50,41 @@ struct TrashView: View {
 
                 if !items.isEmpty {
                     floatingConfirmButton
-                        .padding(.bottom, 65)
+                        .padding(.bottom, 34)
                 }
             }
             .navigationTitle("待删区")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "arrow.left")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(.primary)
+                            .frame(width: 36, height: 36)
+                            .background(Color(UIColor.systemBackground))
+                            .clipShape(Circle())
+                            .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+                    }
+                    .buttonStyle(.plain)
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
-                        items.forEach { viewModel.removeFromPending($0) }
+                        showingClearAllAlert = true
                     } label: {
                         Image(systemName: "arrow.uturn.backward")
                     }
                     .disabled(items.isEmpty)
                 }
             }
+        }
+        .alert("清空待删区？", isPresented: $showingClearAllAlert) {
+            Button("取消", role: .cancel) {}
+            Button("确定清空", role: .destructive) {
+                items.forEach { viewModel.removeFromPending($0) }
+            }
+        } message: {
+            Text("将移除所有已选照片的待删标记，可在时间轴或首页重新选择。")
         }
         .alert("确认删除这些照片？", isPresented: $showingConfirmAlert) {
             Button("取消", role: .cancel) {}
@@ -115,22 +137,30 @@ struct TrashView: View {
     }
 
     private var floatingConfirmButton: some View {
-        Button(action: {
-            showingConfirmAlert = true
-        }) {
-            HStack {
-                Image(systemName: "trash.fill")
-                Text("确认删除 (\(items.count))")
+        VStack(spacing: 12) {
+            Button(action: {
+                showingConfirmAlert = true
+            }) {
+                HStack {
+                    Image(systemName: "trash.fill")
+                    Text("确认删除 (\(items.count))")
+                }
+                .font(.headline.weight(.bold))
+                .padding()
+                .frame(maxWidth: .infinity)
+                .background(Color("brand-start"))
+                .foregroundColor(.white)
+                .cornerRadius(16)
+                .shadow(color: Color("brand-start").opacity(0.3), radius: 10, y: 5)
             }
-            .font(.headline.weight(.bold))
-            .padding()
-            .frame(maxWidth: .infinity)
-            .background(Color("brand-start"))
-            .foregroundColor(.white)
-            .cornerRadius(16)
-            .shadow(color: Color("brand-start").opacity(0.3), radius: 10, y: 5)
+            Button("关闭") {
+                dismiss()
+            }
+            .font(.subheadline.bold())
+            .foregroundColor(.secondary)
         }
         .padding(.horizontal, 24)
+        .padding(.bottom, 8)
         .disabled(items.isEmpty || isDeleting)
     }
     

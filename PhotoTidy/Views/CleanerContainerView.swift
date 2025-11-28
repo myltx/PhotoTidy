@@ -47,8 +47,8 @@ struct CleanerContainerView: View {
         }
         .background(Color(UIColor.systemBackground).ignoresSafeArea())
         .sheet(isPresented: $showTrashSheet) {
-            PendingDeletionView(viewModel: viewModel)
-                .presentationDetents([.fraction(0.6), .large])
+            TrashView(viewModel: viewModel)
+                .presentationDetents([.fraction(0.5), .large])
                 .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $viewModel.isShowingSuccessSummary) {
