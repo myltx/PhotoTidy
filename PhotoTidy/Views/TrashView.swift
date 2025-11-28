@@ -31,13 +31,8 @@ struct TrashView: View {
                                 .padding(.vertical, 80)
                         } else {
                             LazyVGrid(columns: gridColumns, spacing: 12) {
-                                let previewItems = Array(items.prefix(3))
-                                ForEach(previewItems, id: \.id) { item in
+                                ForEach(items, id: \.id) { item in
                                     TrashPreviewCell(item: item, viewModel: viewModel)
-                                }
-
-                                if items.count > previewItems.count {
-                                    plusMoreTile(extra: items.count - previewItems.count)
                                 }
                             }
                             .padding(.top, 8)
@@ -84,7 +79,7 @@ struct TrashView: View {
         }
         .padding(.horizontal, 24)
         .padding(.top, 12)
-        .padding(.bottom, 65)
+        .padding(.bottom, 24)
         .background(Color.clear)
     }
 
@@ -108,17 +103,6 @@ struct TrashView: View {
                 .foregroundColor(.secondary)
         }
         .padding(.top, 80)
-    }
-
-    private func plusMoreTile(extra: Int) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(UIColor.systemGray5))
-            Text("+\(extra)")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundColor(.secondary)
-        }
-        .frame(height: 100)
     }
 
     private var confirmButton: some View {

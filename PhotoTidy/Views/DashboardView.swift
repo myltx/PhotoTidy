@@ -22,9 +22,6 @@ struct DashboardView: View {
                 .padding(.bottom, 32)
             }
             .background(Color(UIColor.systemGroupedBackground))
-            .safeAreaInset(edge: .bottom) {
-                Spacer().frame(height: 65) // Padding for floating tab bar
-            }
             .navigationTitle("首页")
             .navigationBarTitleDisplayMode(.inline)
         }

@@ -48,18 +48,34 @@ struct ContentView: View {
 // MARK: - Main App View Structure
 struct MainAppView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
+    private let tabBarHeight: CGFloat = 65
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            if viewModel.currentTab == .dashboard {
-                DashboardView(viewModel: viewModel)
-            } else if viewModel.currentTab == .trash {
-                TrashView(viewModel: viewModel)
-            } else {
-                SettingsView(viewModel: viewModel)
-            }
+        GeometryReader { proxy in
+            let safeBottom = proxy.safeAreaInsets.bottom
+            let bottomInset = tabBarHeight + max(safeBottom - 10, 6)
+            ZStack(alignment: .bottom) {
+                Group {
+                    switch viewModel.currentTab {
+                    case .dashboard:
+                        DashboardView(viewModel: viewModel)
+                    case .trash:
+                        TrashView(viewModel: viewModel)
+                    case .settings:
+                        SettingsView(viewModel: viewModel)
+                    }
+                }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    Color.clear
+                        .frame(height: bottomInset)
+                        .allowsHitTesting(false)
+                }
 
-            BottomNavBar(viewModel: viewModel)
+                BottomNavBar(viewModel: viewModel)
+                    .padding(.top, 6)
+                    .padding(.bottom, max(safeBottom - 12, 4))
+            }
+            .ignoresSafeArea(edges: .bottom)
         }
         .animation(.default, value: viewModel.currentTab)
         .fullScreenCover(isPresented: $viewModel.isShowingCleaner) {
