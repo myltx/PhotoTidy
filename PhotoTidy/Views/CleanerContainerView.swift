@@ -51,6 +51,9 @@ struct CleanerContainerView: View {
                 .presentationDetents([.fraction(0.6), .large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $viewModel.isShowingSuccessSummary) {
+            SuccessSummaryView(viewModel: viewModel)
+        }
     }
 }
 

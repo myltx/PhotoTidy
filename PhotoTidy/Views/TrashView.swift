@@ -146,7 +146,7 @@ struct TrashView: View {
         isDeleting = true
         viewModel.performDeletion { success, error in
             isDeleting = false
-            if let error = error {
+            if let error = error, !success {
                 deleteError = error
             }
         }

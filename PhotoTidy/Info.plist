@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-<dict/>
+<dict>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>我们需要访问您的相册以智能分析和管理您的照片。您的数据只会在本地处理，我们绝不会上传您的任何隐私。</string>
+</dict>
 </plist>

@@ -5,7 +5,7 @@ struct SuccessSummaryView: View {
     @Environment(\.dismiss) private var dismiss
 
     private var freedAmount: (value: String, unit: String) {
-        let bytes = max(viewModel.pendingDeletionTotalSize, 0)
+        let bytes = max(viewModel.lastFreedSpace, 0)
         let gb = Double(bytes) / (1024 * 1024 * 1024)
         if gb >= 1 {
             return (String(format: "%.1f", gb), "GB")
@@ -19,6 +19,16 @@ struct SuccessSummaryView: View {
             return (String(format: "%.0f", kb), "KB")
         }
         return ("0", "KB")
+    }
+
+    private var freedReadableText: String {
+        let bytes = max(viewModel.lastFreedSpace, 0)
+        guard bytes > 0 else { return "--" }
+        return bytes.fileSizeDescription
+    }
+
+    private var deletionCountText: String? {
+        viewModel.lastDeletedItemsCount > 0 ? "共删除 \(viewModel.lastDeletedItemsCount) 项内容" : nil
     }
 
     var body: some View {
@@ -73,6 +83,18 @@ struct SuccessSummaryView: View {
                         Text(freedAmount.unit)
                             .font(.system(size: 24, weight: .medium))
                             .foregroundColor(Color.white.opacity(0.85))
+                    }
+
+                    VStack(spacing: 4) {
+                        Text("≈ \(freedReadableText)")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(Color.white.opacity(0.85))
+
+                        if let deletionCountText {
+                            Text(deletionCountText)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(Color.white.opacity(0.7))
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity)

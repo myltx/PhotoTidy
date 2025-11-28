@@ -20,17 +20,21 @@ final class PhotoCleanupViewModel: ObservableObject {
     // Data
     @Published var items: [PhotoItem] = []
     @Published var sessionItems: [PhotoItem] = []
+    @Published var lastFreedSpace: Int = 0
+    @Published var lastDeletedItemsCount: Int = 0
     
     // Navigation & Session State
     @Published var currentTab: AppView = .dashboard
     @Published var isShowingCleaner: Bool = false
     @Published var activeDetail: DashboardDetail?
+    @Published var isShowingSuccessSummary: Bool = false
     
     @Published var currentFilter: CleanupFilterMode = .all
     @Published var currentIndex: Int = 0
 
     // Services
     let imageManager = PHCachingImageManager()
+    private var cancellable: AnyCancellable?
 
     // MARK: - Computed Properties
     
@@ -54,6 +58,26 @@ final class PhotoCleanupViewModel: ObservableObject {
     init() {
         if authorizationStatus == .authorized || authorizationStatus == .limited {
             loadAssets()
+        }
+        
+        cancellable = NotificationCenter.default
+            .publisher(for: UIApplication.willEnterForegroundNotification)
+            .sink { [weak self] _ in
+                self?.updateAuthorizationStatus()
+            }
+    }
+    
+    // MARK: - Status Updates
+    
+    private func updateAuthorizationStatus() {
+        DispatchQueue.main.async {
+            let oldStatus = self.authorizationStatus
+            let newStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+            self.authorizationStatus = newStatus
+
+            if newStatus != oldStatus && (newStatus == .authorized || newStatus == .limited) {
+                self.loadAssets()
+            }
         }
     }
     
@@ -477,12 +501,39 @@ final class PhotoCleanupViewModel: ObservableObject {
         }
     }
 
+    private func revalidateSimilarGroups() {
+        var groupCounts = [Int: Int]()
+        let similarItems = items.filter { $0.similarGroupId != nil }
+        for item in similarItems {
+            if let groupId = item.similarGroupId {
+                groupCounts[groupId, default: 0] += 1
+            }
+        }
+        
+        let orphanedGroupIds = groupCounts.filter { $1 < 2 }.map { $0.key }
+        guard !orphanedGroupIds.isEmpty else { return }
+        let orphanedSet = Set(orphanedGroupIds)
+        
+        for i in 0..<items.count {
+            if let groupId = items[i].similarGroupId, orphanedSet.contains(groupId) {
+                items[i].similarGroupId = nil
+                items[i].similarityKind = nil
+            }
+        }
+    }
+
     func performDeletion(completion: @escaping (Bool, Error?) -> Void) {
-        let toDeleteAssets = items.filter { $0.markedForDeletion }.map { $0.asset }
-        guard !toDeleteAssets.isEmpty else {
+        let toDeleteItems = items.filter { $0.markedForDeletion }
+        guard !toDeleteItems.isEmpty else {
             completion(true, nil)
             return
         }
+
+        let toDeleteAssets = toDeleteItems.map { $0.asset }
+
+        // 记录待删除文件总大小与数量
+        self.lastFreedSpace = toDeleteItems.reduce(0) { $0 + $1.fileSize }
+        self.lastDeletedItemsCount = toDeleteItems.count
 
         PHPhotoLibrary.shared().performChanges({
             PHAssetChangeRequest.deleteAssets(toDeleteAssets as NSArray)
@@ -491,10 +542,21 @@ final class PhotoCleanupViewModel: ObservableObject {
                 if success {
                     let toDeleteIds = Set(toDeleteAssets.map { $0.localIdentifier })
                     self.items.removeAll { toDeleteIds.contains($0.id) }
+                    self.revalidateSimilarGroups()
                     self.refreshSession()
+                    // 触发成功页面
+                    self.presentSuccessSummary()
                 }
                 completion(success, error)
             }
+        }
+    }
+
+    private func presentSuccessSummary() {
+        if isShowingCleaner {
+            isShowingSuccessSummary = true
+        } else {
+            activeDetail = .success
         }
     }
 }
