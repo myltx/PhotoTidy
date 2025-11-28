@@ -10,6 +10,7 @@ struct SimilarComparisonView: View {
     @State private var currentGroupIndex: Int = 0
     @State private var cachedGroups: [[PhotoItem]] = []
     @State private var previewItem: PhotoItem?
+    @State private var heroTransitionEdge: Edge = .trailing
 
     private var currentGroup: [PhotoItem]? {
         guard !cachedGroups.isEmpty,
@@ -80,7 +81,8 @@ struct SimilarComparisonView: View {
                 onPrevious: { showPreviousInGroup(group) },
                 onNext: { showNextInGroup(group) },
                 onPreview: { previewItem = hero },
-                viewModel: viewModel
+                viewModel: viewModel,
+                transitionEdge: heroTransitionEdge
             )
             .padding(.horizontal, 24)
             .padding(.top, 4)
@@ -152,7 +154,7 @@ struct SimilarComparisonView: View {
         .padding(6)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white)
+                .fill(Color(UIColor.secondarySystemBackground))
                 .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
                 .overlay(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -219,13 +221,13 @@ struct SimilarComparisonView: View {
     private func showPreviousInGroup(_ group: [PhotoItem]) {
         let idx = currentHeroIndex(in: group, defaultIndex: recommendedIndex(for: group))
         guard idx > 0 else { return }
-        selectedId = group[idx - 1].id
+        animateHeroChange(to: group[idx - 1].id, direction: .leading)
     }
 
     private func showNextInGroup(_ group: [PhotoItem]) {
         let idx = currentHeroIndex(in: group, defaultIndex: recommendedIndex(for: group))
         guard idx < group.count - 1 else { return }
-        selectedId = group[idx + 1].id
+        animateHeroChange(to: group[idx + 1].id, direction: .trailing)
     }
 
     // MARK: - Thumbnail Strip
@@ -246,9 +248,8 @@ struct SimilarComparisonView: View {
                         imageManager: viewModel.imageManager
                     )
                     .onTapGesture {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            selectedId = item.id
-                        }
+                        let direction: Edge = idx > heroIndex ? .trailing : .leading
+                        animateHeroChange(to: item.id, direction: direction)
                     }
                 }
             }
@@ -330,6 +331,7 @@ struct SimilarComparisonView: View {
     /// 跳到上一组，不改任何删除标记
     private func moveToPreviousGroup() {
         guard currentGroupIndex > 0 else { return }
+        heroTransitionEdge = .leading
         currentGroupIndex -= 1
     }
 
@@ -337,6 +339,7 @@ struct SimilarComparisonView: View {
     private func moveToNextGroup() {
         let lastIndex = max(totalGroups - 1, 0)
         guard currentGroupIndex < lastIndex else { return }
+        heroTransitionEdge = .trailing
         currentGroupIndex += 1
     }
 
@@ -348,6 +351,7 @@ struct SimilarComparisonView: View {
     private func moveToNextGroupOrDismiss() {
         let lastIndex = max(totalGroups - 1, 0)
         if currentGroupIndex < lastIndex {
+            heroTransitionEdge = .trailing
             currentGroupIndex += 1
         } else {
             dismiss()
@@ -405,7 +409,15 @@ struct SimilarComparisonView: View {
             return
         }
         let recommended = recommendedIndex(for: group)
+        heroTransitionEdge = .trailing
         selectedId = group[recommended].id
+    }
+
+    private func animateHeroChange(to newId: String, direction: Edge) {
+        heroTransitionEdge = direction
+        withAnimation(.easeInOut(duration: 0.3)) {
+            selectedId = newId
+        }
     }
 
     // MARK: - 空态 / 分析中
@@ -446,11 +458,12 @@ private struct HeroViewer: View {
     let onPreview: () -> Void
 
     @ObservedObject var viewModel: PhotoCleanupViewModel
+    let transitionEdge: Edge
 
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color.white)
+                .fill(Color(UIColor.systemBackground))
                 .shadow(color: .black.opacity(0.12), radius: 10, y: 6)
                 .overlay(
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -466,6 +479,9 @@ private struct HeroViewer: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.black.opacity(0.02))
                 .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .id(item.id)
+                .transition(imageTransition(for: transitionEdge))
+                .animation(.easeInOut(duration: 0.3), value: item.id)
 
                 // 组内索引：2 / 3
                 Text("\(indexInGroup + 1) / \(totalCount)")
@@ -562,7 +578,7 @@ private struct HeroViewer: View {
     private func navCircle(systemImage: String) -> some View {
         ZStack {
             Circle()
-                .fill(Color.white.opacity(0.9))
+                .fill(Color(UIColor.systemBackground).opacity(0.9))
                 .shadow(color: .black.opacity(0.1), radius: 3, y: 1)
             Image(systemName: systemImage)
                 .font(.system(size: 14, weight: .bold))
@@ -582,6 +598,13 @@ private struct HeroViewer: View {
         }
 
         return parts.joined(separator: " • ")
+    }
+
+    private func imageTransition(for edge: Edge) -> AnyTransition {
+        let insertion = AnyTransition.move(edge: edge).combined(with: .opacity)
+        let removalEdge: Edge = edge == .leading ? .trailing : .leading
+        let removal = AnyTransition.move(edge: removalEdge).combined(with: .opacity)
+        return .asymmetric(insertion: insertion, removal: removal)
     }
 }
 
@@ -614,7 +637,7 @@ private struct ThumbnailView: View {
                         lineWidth: isHero ? 2 : 1
                     )
             )
-            .background(Color.white)
+            .background(Color(UIColor.systemBackground))
             .clipShape(RoundedRectangle(cornerRadius: isHero ? 12 : 8, style: .continuous))
             .shadow(color: isHero ? Color.black.opacity(0.2) : Color.clear,
                     radius: isHero ? 6 : 0,

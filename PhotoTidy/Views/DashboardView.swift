@@ -20,7 +20,13 @@ struct DashboardView: View {
             .padding(.top, 24)
             .padding(.bottom, 32)
         }
-        .background(Color(UIColor.systemGray6))
+        .background(Color(UIColor.systemGroupedBackground))
+        .safeAreaInset(edge: .top) {
+            Spacer().frame(height: 0)
+        }
+        .safeAreaInset(edge: .bottom) {
+            Spacer().frame(height: 65) // Padding for floating tab bar
+        }
     }
 }
 
@@ -63,7 +69,7 @@ private extension DashboardView {
                 .font(.system(size: 36))
                 .foregroundColor(.gray)
                 .frame(width: 40, height: 40)
-                .background(Color.white)
+                .background(Color(UIColor.systemBackground))
                 .clipShape(Circle())
                 .overlay(Circle().stroke(Color.white, lineWidth: 2))
                 .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
@@ -115,21 +121,21 @@ private extension DashboardView {
                                 Text("正在准备…")
                                     .font(.system(size: 12, weight: .bold))
                             }
-                            .foregroundColor(.gray)
+                            .foregroundColor(.secondary)
                         } else {
                             HStack(spacing: 6) {
                                 Image(systemName: "play.fill")
                                     .font(.system(size: 12, weight: .bold))
-                                    .foregroundColor(Color.indigo)
+                                    .foregroundColor(Color("brand-start"))
                                 Text("开始")
                                     .font(.system(size: 12, weight: .bold))
                             }
-                            .foregroundColor(.black)
+                            .foregroundColor(.primary)
                         }
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                    .background(Color.white.opacity(viewModel.isLoading ? 0.8 : 1))
+                    .background(Color(UIColor.systemBackground).opacity(viewModel.isLoading ? 0.8 : 1))
                     .cornerRadius(14)
                 }
                 .padding(.top, 6)
@@ -219,12 +225,12 @@ private struct SmartTile: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white)
+            .background(Color(UIColor.secondarySystemBackground))
             .cornerRadius(20)
             .shadow(color: Color.black.opacity(0.05), radius: 4, y: 2)
             .overlay(
                 RoundedRectangle(cornerRadius: 20)
-                    .stroke(Color(UIColor.systemGray5), lineWidth: 1)
+                    .stroke(Color(UIColor.systemGray4), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)

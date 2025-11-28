@@ -26,7 +26,7 @@ struct ScreenshotDocumentView: View {
 
     var body: some View {
         ZStack {
-            Color(UIColor.systemGray6).ignoresSafeArea()
+            Color(UIColor.systemGroupedBackground).ignoresSafeArea()
 
             VStack(spacing: 0) {
                 ModalNavigationHeader(
@@ -65,12 +65,12 @@ struct ScreenshotDocumentView: View {
         let isActive = filterIndex == index
         return Text(title)
             .font(.system(size: 11, weight: isActive ? .bold : .medium))
-            .foregroundColor(isActive ? Color("brand-start") : .gray)
+            .foregroundColor(isActive ? Color("brand-start") : .secondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 999, style: .continuous)
-                    .fill(isActive ? Color("brand-start").opacity(0.12) : Color(UIColor.systemGray5))
+                    .fill(isActive ? Color("brand-start").opacity(0.15) : Color(UIColor.secondarySystemFill))
             )
             .onTapGesture {
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -130,7 +130,7 @@ struct ScreenshotDocumentView: View {
             .padding(10)
             .background(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color.white)
+                    .fill(Color(UIColor.secondarySystemBackground))
                     .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
                     .overlay(
                         RoundedRectangle(cornerRadius: 20, style: .continuous)

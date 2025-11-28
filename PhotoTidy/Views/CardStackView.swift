@@ -172,7 +172,7 @@ private struct PhotoCardViewWrapper: View {
             .foregroundColor(color)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(Color.white.opacity(0.96))
+            .background(Color(UIColor.systemBackground).opacity(0.96))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .stroke(color, lineWidth: 2)

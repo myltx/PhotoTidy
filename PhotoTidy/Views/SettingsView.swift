@@ -4,19 +4,21 @@ struct SettingsView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 24) {
-                header
-                proCard
-                cleanupPreferences
-                generalSection
-                helperSection
+        GeometryReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 24) {
+                    header
+                    proCard
+                    cleanupPreferences
+                    generalSection
+                    helperSection
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 32 + proxy.safeAreaInsets.top)
+                .padding(.bottom, 120)
             }
-            .padding(.horizontal, 24)
-            .padding(.top, 32)
-            .padding(.bottom, 120)
         }
-        .background(Color(UIColor.systemGray6))
+        .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
     }
 }
 
@@ -79,15 +81,33 @@ private extension SettingsView {
 
     var generalSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("通用").font(.caption).foregroundColor(.secondary).padding(.leading, 8)
+            Text("主题与通用").font(.caption).foregroundColor(.secondary).padding(.leading, 8)
             VStack(spacing: 0) {
-                settingRow(icon: "moon", title: "深色模式", detail: "跟随系统")
+                themeSelectorRow
+                    .padding(.horizontal)
+                    .padding(.vertical, 16)
                 Divider()
                 settingRow(icon: "questionmark.circle", title: "帮助与反馈", detail: nil, showChevron: true)
             }
             .background(Color(UIColor.systemBackground))
             .cornerRadius(22)
             .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
+        }
+    }
+
+    var themeSelectorRow: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("主题外观", systemImage: "moon")
+                .foregroundColor(.primary)
+                .font(.headline)
+                .padding(.bottom, 4)
+
+            Picker("", selection: $viewModel.selectedTheme) {
+                ForEach(AppTheme.allCases) { theme in
+                    Text(theme.displayName).tag(theme)
+                }
+            }
+            .pickerStyle(.segmented)
         }
     }
 

@@ -30,6 +30,7 @@ struct ContentView: View {
                 }
             }
         }
+        .preferredColorScheme(viewModel.selectedTheme.preferredColorScheme)
         .onAppear {
             if viewModel.authorizationStatus == .authorized || viewModel.authorizationStatus == .limited {
                 viewModel.loadAssets()

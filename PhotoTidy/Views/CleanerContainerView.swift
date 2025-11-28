@@ -6,7 +6,7 @@ struct CleanerContainerView: View {
 
     var body: some View {
         ZStack {
-            Color.white
+            Color(UIColor.systemBackground)
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
@@ -189,7 +189,7 @@ private struct TrashButton: View {
         Button(action: action) {
             ZStack {
                 Circle()
-                    .fill(Color.white)
+                    .fill(Color(UIColor.systemBackground))
                     .frame(width: 40, height: 40)
                     .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
                 Image(systemName: "trash")
@@ -226,9 +226,9 @@ private struct CleanerFooter: View {
                     .font(.system(size: 28, weight: .bold))
                     .foregroundColor(.red)
                     .frame(width: 70, height: 70)
-                    .background(Color.white)
+                    .background(Color(UIColor.systemBackground))
                     .clipShape(Circle())
-                    .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 5)
+                    .shadow(color: .black.opacity(0.08), radius: 10, x: 0, y: 5)
 
             }
             

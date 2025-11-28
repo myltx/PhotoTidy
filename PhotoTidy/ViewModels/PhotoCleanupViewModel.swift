@@ -11,6 +11,11 @@ final class PhotoCleanupViewModel: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var isAnalyzing: Bool = false
     @Published var analysisProgress: Double = 0
+    @Published var selectedTheme: AppTheme = AppTheme(rawValue: UserDefaults.standard.string(forKey: "app_theme") ?? "") ?? .system {
+        didSet {
+            UserDefaults.standard.set(selectedTheme.rawValue, forKey: "app_theme")
+        }
+    }
 
     // Data
     @Published var items: [PhotoItem] = []

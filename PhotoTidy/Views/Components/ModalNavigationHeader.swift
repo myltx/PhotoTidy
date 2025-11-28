@@ -14,9 +14,9 @@ struct ModalNavigationHeader: View {
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(.primary)
                     .frame(width: 40, height: 40)
-                    .background(Color.white)
+                    .background(Color(UIColor.systemBackground))
                     .clipShape(Circle())
-                    .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+                    .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
             }
 
             Spacer()
