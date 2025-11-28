@@ -30,7 +30,7 @@ struct ContentView: View {
                 }
             }
         }
-        .preferredColorScheme(viewModel.selectedTheme.preferredColorScheme)
+        .applyColorScheme(viewModel.selectedTheme.preferredColorScheme)
         .onAppear {
             if viewModel.authorizationStatus == .authorized || viewModel.authorizationStatus == .limited {
                 viewModel.loadAssets()
@@ -42,6 +42,17 @@ struct ContentView: View {
         (viewModel.authorizationStatus == .authorized || viewModel.authorizationStatus == .limited) &&
         viewModel.isLoading &&
         viewModel.items.isEmpty
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func applyColorScheme(_ scheme: ColorScheme?) -> some View {
+        if let scheme {
+            preferredColorScheme(scheme)
+        } else {
+            self
+        }
     }
 }
 
