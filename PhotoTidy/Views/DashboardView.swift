@@ -36,9 +36,14 @@ private extension DashboardView {
                 Text("存储概览")
                     .font(.headline)
                     .foregroundColor(.secondary)
-                Text("本机存储已用 82%")
+                Text(storageUsageDescription)
                     .font(.caption)
                     .foregroundColor(.secondary)
+                if let detailText = storageUsageDetailText {
+                    Text(detailText)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
 
                 if viewModel.isLoading {
                     HStack(spacing: 6) {
@@ -63,10 +68,10 @@ private extension DashboardView {
                 }
             }
             Spacer()
-            Image(systemName: "person.crop.circle.fill")
-                .font(.system(size: 36))
-                .foregroundColor(.gray)
-                .frame(width: 40, height: 40)
+            Image("duck")
+                .resizable()
+                .scaledToFill()
+                .frame(width: 44, height: 44)
                 .background(Color(UIColor.systemBackground))
                 .clipShape(Circle())
                 .overlay(Circle().stroke(Color.white, lineWidth: 2))
@@ -200,7 +205,18 @@ private extension DashboardView {
         }
         .padding(.bottom, 40)
     }
-
+    
+    var storageUsageDescription: String {
+        if let percent = viewModel.deviceStorageUsage.formattedPercentageText {
+            return "本机存储已用 \(percent)"
+        } else {
+            return "正在获取本机存储…"
+        }
+    }
+    
+    var storageUsageDetailText: String? {
+        viewModel.deviceStorageUsage.formattedUsageDetailText
+    }
 }
 
 // MARK: - Smart Tile

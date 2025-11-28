@@ -190,9 +190,13 @@ struct LargeFilesView: View {
 
                 Spacer()
 
-                Text(item.fileSize.fileSizeDescription)
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(Color("brand-start"))
+                HStack(spacing: 8) {
+                    Text(item.fileSize.fileSizeDescription)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(Color("brand-start"))
+
+                    selectionIndicator(isSelected: isSelected)
+                }
             }
             .padding(.vertical, 6)
             .overlay(
@@ -215,5 +219,24 @@ struct LargeFilesView: View {
             parts.append("视频")
         }
         return parts.joined(separator: " • ")
+    }
+    
+    private func selectionIndicator(isSelected: Bool) -> some View {
+        ZStack {
+            Circle()
+                .fill(isSelected ? Color("brand-start") : Color.clear)
+                .overlay(
+                    Circle()
+                        .stroke(isSelected ? Color("brand-start") : Color.secondary.opacity(0.4), lineWidth: 1.8)
+                )
+            
+            if isSelected {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.white)
+            }
+        }
+        .frame(width: 22, height: 22)
+        .animation(.easeInOut(duration: 0.15), value: isSelected)
     }
 }

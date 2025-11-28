@@ -22,6 +22,7 @@ final class PhotoCleanupViewModel: ObservableObject {
     @Published var sessionItems: [PhotoItem] = []
     @Published var lastFreedSpace: Int = 0
     @Published var lastDeletedItemsCount: Int = 0
+    @Published var deviceStorageUsage: DeviceStorageUsage = .empty
     
     // Navigation & Session State
     @Published var currentTab: AppView = .dashboard
@@ -56,6 +57,7 @@ final class PhotoCleanupViewModel: ObservableObject {
     // MARK: - Initialization
     
     init() {
+        refreshDeviceStorageUsage()
         if authorizationStatus == .authorized || authorizationStatus == .limited {
             loadAssets()
         }
@@ -64,6 +66,7 @@ final class PhotoCleanupViewModel: ObservableObject {
             .publisher(for: UIApplication.willEnterForegroundNotification)
             .sink { [weak self] _ in
                 self?.updateAuthorizationStatus()
+                self?.refreshDeviceStorageUsage()
             }
     }
     
@@ -558,5 +561,64 @@ final class PhotoCleanupViewModel: ObservableObject {
         } else {
             activeDetail = .success
         }
+    }
+    
+    private func refreshDeviceStorageUsage() {
+        DispatchQueue.global(qos: .utility).async {
+            let usage = DeviceStorageUsage.current()
+            DispatchQueue.main.async {
+                self.deviceStorageUsage = usage
+            }
+        }
+    }
+}
+
+struct DeviceStorageUsage {
+    let totalBytes: Int64
+    let freeBytes: Int64
+    
+    var usedBytes: Int64 {
+        max(totalBytes - freeBytes, 0)
+    }
+    
+    var usagePercentage: Double {
+        guard totalBytes > 0 else { return 0 }
+        return Double(usedBytes) / Double(totalBytes)
+    }
+    
+    var hasValidData: Bool { totalBytes > 0 }
+    
+    var formattedPercentageText: String? {
+        guard hasValidData else { return nil }
+        let percent = max(0, min(usagePercentage * 100, 100))
+        return String(format: "%.0f%%", percent)
+    }
+    
+    var formattedUsageDetailText: String? {
+        guard hasValidData else { return nil }
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        formatter.allowsNonnumericFormatting = false
+        let used = formatter.string(fromByteCount: usedBytes)
+        let total = formatter.string(fromByteCount: totalBytes)
+        return "\(used) / \(total)"
+    }
+    
+    static let empty = DeviceStorageUsage(totalBytes: 0, freeBytes: 0)
+    
+    static func current() -> DeviceStorageUsage {
+        let path = NSHomeDirectory()
+        guard
+            let attributes = try? FileManager.default.attributesOfFileSystem(forPath: path),
+            let total = attributes[.systemSize] as? NSNumber,
+            let free = attributes[.systemFreeSize] as? NSNumber
+        else {
+            return .empty
+        }
+        
+        return DeviceStorageUsage(
+            totalBytes: total.int64Value,
+            freeBytes: free.int64Value
+        )
     }
 }
