@@ -25,29 +25,6 @@ struct DashboardView: View {
             .background(Color(UIColor.systemGroupedBackground))
             .navigationTitle("首页")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        onShowTrash?()
-                    } label: {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: "trash")
-                                .imageScale(.medium)
-                            if viewModel.pendingDeletionItems.count > 0 {
-                                Text("\(min(viewModel.pendingDeletionItems.count, 99))")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 2)
-                                    .background(Color("brand-start"))
-                                    .clipShape(Capsule())
-                                    .offset(x: 6, y: -6)
-                            }
-                        }
-                    }
-                    .accessibilityLabel("打开待删区")
-                }
-            }
         }
     }
 }
@@ -55,51 +32,60 @@ struct DashboardView: View {
 // MARK: - Sections
 private extension DashboardView {
     var headerSection: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("存储概览")
-                    .font(.headline)
-                    .foregroundColor(.secondary)
-                Text(storageUsageDescription)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                if let detailText = storageUsageDetailText {
-                    Text(detailText)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+        VStack(spacing: 18) {
+            HStack {
+                HStack(spacing: 12) {
+                    Image("duck")
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 52, height: 52)
+                        .background(Color.white)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(Color.white, lineWidth: 3))
+                        .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(greetingText)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+                        Text("PhotoTidy")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(.primary)
+                    }
                 }
 
-                if viewModel.isLoading {
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                            .scaleEffect(0.6)
-                        Text("正在加载相册…")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
+                Spacer()
+
+                Button {
+                    onShowTrash?()
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(Color.white)
+                            .frame(width: 46, height: 46)
+                            .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
+                        Image(systemName: "trash")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(Color("brand-start"))
                     }
-                    .padding(.top, 2)
-                } else if viewModel.isAnalyzing {
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                            .scaleEffect(0.6)
-                        Text("AI 正在分析相似照片…")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
+                    .overlay(alignment: .topTrailing) {
+                        if viewModel.pendingDeletionItems.count > 0 {
+                            Text("\(min(viewModel.pendingDeletionItems.count, 99))")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Color.red)
+                                .clipShape(Capsule())
+                                .offset(x: 8, y: -8)
+                        }
                     }
-                    .padding(.top, 2)
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("打开待删区")
             }
-            Spacer()
-            Image("duck")
-                .resizable()
-                .scaledToFill()
-                .frame(width: 44, height: 44)
-                .background(Color(UIColor.systemBackground))
-                .clipShape(Circle())
-                .overlay(Circle().stroke(Color.white, lineWidth: 2))
-                .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+
+            storageSummaryCard
         }
     }
 
@@ -230,16 +216,124 @@ private extension DashboardView {
         .padding(.bottom, 40)
     }
     
-    var storageUsageDescription: String {
+    private var storageSummaryCard: some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .lastTextBaseline) {
+                    Text("存储空间")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Text(usagePercentageText)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(Color("brand-start"))
+                }
+                
+                storageProgressBar
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    if let detail = storageUsageDetailText {
+                        Text(detail)
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
+                    Text(storageSuggestionText)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(Color("brand-start"))
+                }
+                
+                if let status = analysisStatusText {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .scaleEffect(0.5)
+                        Text(status)
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            
+            ZStack {
+                Circle()
+                    .fill(Color(UIColor.systemGray6))
+                    .frame(width: 52, height: 52)
+                Image(systemName: "internaldrive")
+                    .font(.system(size: 22))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(Color.white)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .stroke(Color.black.opacity(0.04), lineWidth: 1)
+                )
+        )
+        .shadow(color: .black.opacity(0.04), radius: 8, y: 4)
+    }
+    
+    private var storageProgressBar: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color(UIColor.systemGray5))
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color("brand-start"), Color("brand-end")],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: max(CGFloat(usageProgress) * proxy.size.width, 8))
+            }
+        }
+        .frame(height: 10)
+    }
+    
+    private var usagePercentageText: String {
         if let percent = viewModel.deviceStorageUsage.formattedPercentageText {
-            return "本机存储已用 \(percent)"
-        } else {
-            return "正在获取本机存储…"
+            return "已用 \(percent)"
+        }
+        return "正在计算…"
+    }
+    
+    private var storageUsageDetailText: String? {
+        viewModel.deviceStorageUsage.formattedUsageDetailText
+    }
+    
+    private var usageProgress: Double {
+        min(max(viewModel.deviceStorageUsage.usagePercentage, 0), 1)
+    }
+    
+    private var storageSuggestionText: String {
+        let bytes = viewModel.pendingDeletionTotalSize
+        if bytes > 0 {
+            return "建议清理 \(bytes.fileSizeDescription)"
+        }
+        return "定期清理可保持充足空间"
+    }
+    
+    private var greetingText: String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        switch hour {
+        case 5..<12: return "早上好"
+        case 12..<18: return "下午好"
+        case 18..<23: return "晚上好"
+        default: return "夜深了"
         }
     }
     
-    var storageUsageDetailText: String? {
-        viewModel.deviceStorageUsage.formattedUsageDetailText
+    private var analysisStatusText: String? {
+        if viewModel.isLoading {
+            return "正在加载相册…"
+        } else if viewModel.isAnalyzing {
+            return "AI 正在分析中…"
+        }
+        return nil
     }
 }
 

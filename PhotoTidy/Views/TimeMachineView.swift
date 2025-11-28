@@ -3,136 +3,394 @@ import Photos
 
 struct TimeMachineView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
+    @State private var selectedYear: Int?
+    @State private var selectedDay: TimelineDay?
 
-    private var sections: [TimelineSection] {
-        let calendar = Calendar.current
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "yyyy年 M月"
+    private let calendar = Calendar.current
 
-        let grouped = Dictionary(grouping: viewModel.items) { (item: PhotoItem) -> DateComponents in
-            guard let date = item.creationDate else {
-                return DateComponents(year: 0, month: 0)
-            }
-            return calendar.dateComponents([.year, .month], from: date)
+    private var allMonths: [TimelineMonth] {
+        let formatterCN = DateFormatter()
+        formatterCN.locale = Locale(identifier: "zh_CN")
+        formatterCN.dateFormat = "M月"
+
+        let formatterEN = DateFormatter()
+        formatterEN.locale = Locale(identifier: "en_US")
+        formatterEN.dateFormat = "MMMM"
+
+        let grouped = Dictionary(grouping: viewModel.items.compactMap { item -> (DateComponents, PhotoItem)? in
+            guard let date = item.creationDate else { return nil }
+            let comps = calendar.dateComponents([.year, .month, .day], from: date)
+            return (comps, item)
+        }) { pair in
+            DateComponents(year: pair.0.year, month: pair.0.month)
         }
 
-        return grouped.map { key, value in
-            let items = value.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
-            guard let year = key.year, let month = key.month else {
-                return TimelineSection(
-                    id: "unknown",
-                    title: "未标记日期",
-                    date: .distantPast,
-                    items: items
+        return grouped.compactMap { entry -> TimelineMonth? in
+            let comps = entry.key
+            let tuples = entry.value
+            guard
+                let year = comps.year,
+                let month = comps.month,
+                let monthDate = calendar.date(from: DateComponents(year: year, month: month)),
+                let range = calendar.range(of: .day, in: .month, for: monthDate)
+            else {
+                return nil
+            }
+
+            let photos = tuples.map { $0.1 }
+            let dayGroups = Dictionary(grouping: photos, by: { calendar.component(.day, from: $0.creationDate ?? monthDate) })
+
+            let days: [TimelineDay] = range.map { day -> TimelineDay in
+                let dayDate = calendar.date(from: DateComponents(year: year, month: month, day: day)) ?? monthDate
+                let items = dayGroups[day] ?? []
+                return TimelineDay(
+                    id: "\(year)-\(month)-\(day)",
+                    date: dayDate,
+                    day: day,
+                    items: items.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
                 )
             }
-            let sectionDate = calendar.date(from: DateComponents(year: year, month: month)) ?? .distantPast
-            let title = formatter.string(from: sectionDate)
-            return TimelineSection(
+
+            let firstWeekday = calendar.component(.weekday, from: monthDate)
+            let leading = (firstWeekday - calendar.firstWeekday + 7) % 7
+
+            return TimelineMonth(
                 id: "\(year)-\(month)",
-                title: title,
-                date: sectionDate,
-                items: items
+                date: monthDate,
+                monthTitle: formatterCN.string(from: monthDate),
+                englishTitle: formatterEN.string(from: monthDate),
+                leadingEmptyCount: leading,
+                days: days
             )
         }
         .sorted { $0.date > $1.date }
     }
 
+    private var filteredMonths: [TimelineMonth] {
+        guard let selectedYear else { return allMonths }
+        return allMonths.filter { calendar.component(.year, from: $0.date) == selectedYear }
+    }
+
+    private var availableYears: [Int] {
+        Array(Set(allMonths.map { calendar.component(.year, from: $0.date) })).sorted(by: >)
+    }
+
+    private var displayYearText: String {
+        if let selectedYear { return "\(selectedYear)年" }
+        if let first = filteredMonths.first {
+            return "\(calendar.component(.year, from: first.date))年"
+        }
+        let currentYear = calendar.component(.year, from: Date())
+        return "\(currentYear)年"
+    }
+
+    private var currentMonthItemCount: Int {
+        let now = Date()
+        if let current = allMonths.first(where: { calendar.isDate($0.date, equalTo: now, toGranularity: .month) }) {
+            return current.totalItemCount
+        }
+        return allMonths.first?.totalItemCount ?? 0
+    }
+
     var body: some View {
         NavigationStack {
             Group {
-                if sections.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "photo.on.rectangle")
-                            .font(.system(size: 46))
-                            .foregroundColor(.secondary)
-                        Text("暂无可查看的照片")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.top, 100)
+                if allMonths.isEmpty {
+                    emptyState
                 } else {
-                    List {
-                        ForEach(sections) { section in
-                            Section(header: Text(section.title).font(.headline)) {
-                                NavigationLink {
-                                    TimeMachineMonthView(section: section, viewModel: viewModel)
-                                } label: {
-                                    TimeMachineSectionRow(section: section, viewModel: viewModel)
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 20, pinnedViews: [.sectionHeaders]) {
+                            Section {
+                                VStack(spacing: 28) {
+                                    ForEach(filteredMonths) { month in
+                                        MonthCalendarView(
+                                            month: month,
+                                            onSelectDay: { day in
+                                                if !day.items.isEmpty {
+                                                    selectedDay = day
+                                                }
+                                            }
+                                        )
+                                    }
                                 }
+                                .padding(.top, 12)
+                            } header: {
+                                TimeMachineHeader(
+                                    yearText: displayYearText,
+                                    years: availableYears,
+                                    onSelectYear: { year in
+                                        selectedYear = year
+                                    },
+                                    onResetYear: {
+                                        selectedYear = nil
+                                    },
+                                    monthlyCount: currentMonthItemCount
+                                )
                             }
                         }
                     }
-                    .listStyle(.insetGrouped)
-                }
-            }
-            .navigationTitle("时光机")
-        }
-    }
-}
-
-private struct TimeMachineSectionRow: View {
-    let section: TimelineSection
-    @ObservedObject var viewModel: PhotoCleanupViewModel
-
-    var body: some View {
-        HStack(spacing: 12) {
-            if let cover = section.items.first {
-                AssetThumbnailView(
-                    asset: cover.asset,
-                    imageManager: viewModel.imageManager,
-                    contentMode: .aspectFill
-                )
-                .frame(width: 70, height: 70)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            } else {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color(UIColor.systemGray5))
-                    .frame(width: 70, height: 70)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(section.title)
-                    .font(.headline)
-                Text("\(section.items.count) 张照片")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundColor(.secondary)
-        }
-        .padding(.vertical, 4)
-    }
-}
-
-private struct TimeMachineMonthView: View {
-    let section: TimelineSection
-    @ObservedObject var viewModel: PhotoCleanupViewModel
-    @State private var previewItem: PhotoItem?
-
-    private let columns = [
-        GridItem(.adaptive(minimum: 100), spacing: 8)
-    ]
-
-    var body: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: 8) {
-                ForEach(section.items) { item in
-                    TimelinePhotoCell(item: item, viewModel: viewModel) {
-                        previewItem = item
+                    .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
+                    .sheet(item: $selectedDay) { day in
+                        TimeMachineDayDetailView(day: day, viewModel: viewModel)
+                            .presentationDetents([.large])
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 32)
+            .navigationBarHidden(true)
         }
-        .background(Color(UIColor.systemGroupedBackground))
-        .navigationTitle(section.title)
-        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "calendar.badge.exclamationmark")
+                .font(.system(size: 48))
+                .foregroundColor(.secondary)
+            Text("暂无可展示的时间线")
+                .font(.headline)
+                .foregroundColor(.primary)
+            Text("当你授权访问照片并完成分析后，这里会按照时间展示你的回忆。")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+        }
+        .padding(.top, 120)
+    }
+}
+
+private struct TimeMachineHeader: View {
+    let yearText: String
+    let years: [Int]
+    let onSelectYear: (Int) -> Void
+    let onResetYear: () -> Void
+    let monthlyCount: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("时光机")
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundColor(.primary)
+
+                Spacer()
+
+                Menu {
+                    Button("全部年份") {
+                        onResetYear()
+                    }
+                    ForEach(years, id: \.self) { year in
+                        Button("\(year)年") {
+                            onSelectYear(year)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(yearText)
+                            .font(.system(size: 13, weight: .bold))
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color(UIColor.systemGray5))
+                    .clipShape(Capsule())
+                    .foregroundColor(.secondary)
+                }
+            }
+
+            HStack {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("本月待整理")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.8))
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text("\(monthlyCount)")
+                            .font(.system(size: 32, weight: .bold))
+                        Text("张")
+                            .font(.system(size: 14))
+                    }
+                    .foregroundColor(.white)
+                }
+                Spacer()
+                Circle()
+                    .fill(Color.white.opacity(0.25))
+                    .frame(width: 44, height: 44)
+                    .overlay(
+                        Image(systemName: "calendar")
+                            .foregroundColor(.white)
+                            .font(.system(size: 18, weight: .semibold))
+                    )
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 20)
+            .background(
+                LinearGradient(
+                    colors: [Color("brand-start"), Color("brand-end")],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .shadow(color: Color("brand-start").opacity(0.25), radius: 18, y: 8)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 18)
+        .padding(.bottom, 12)
+        .background(.thinMaterial)
+    }
+}
+
+private struct MonthCalendarView: View {
+    let month: TimelineMonth
+    var onSelectDay: (TimelineDay) -> Void
+
+    private let columns: [GridItem] = Array(repeating: .init(.flexible(), spacing: 6), count: 7)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Text(month.monthTitle)
+                    .font(.system(size: 18, weight: .bold))
+                Text(month.englishTitle)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+
+            HStack {
+                ForEach(["日","一","二","三","四","五","六"], id: \.self) { weekDay in
+                    Text(weekDay)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(0..<month.leadingEmptyCount, id: \.self) { _ in
+                    Color.clear.frame(height: 42)
+                }
+
+                ForEach(month.days) { day in
+                    CalendarDayCell(day: day)
+                        .onTapGesture {
+                            onSelectDay(day)
+                        }
+                }
+            }
+        }
+        .padding(.horizontal, 24)
+    }
+}
+
+private struct CalendarDayCell: View {
+    let day: TimelineDay
+    private let calendar = Calendar.current
+
+    var body: some View {
+        Group {
+            if day.items.isEmpty {
+                Text("\(day.day)")
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary.opacity(0.35))
+                    .frame(height: 42)
+                    .frame(maxWidth: .infinity)
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(
+                            isToday
+                            ? AnyShapeStyle(
+                                LinearGradient(
+                                    colors: [Color("brand-start"), Color("brand-end")],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            : AnyShapeStyle(Color.white)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(isToday ? Color.clear : Color("brand-start").opacity(0.12), lineWidth: 1)
+                        )
+                        .shadow(color: isToday ? Color("brand-start").opacity(0.15) : .clear, radius: 6, y: 3)
+                    VStack(spacing: 4) {
+                        Text("\(day.day)")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(isToday ? .white : .primary)
+                        Circle()
+                            .fill(isToday ? Color.white : Color("brand-start"))
+                            .frame(width: 5, height: 5)
+                    }
+                }
+                .frame(height: 46)
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
+    private var isToday: Bool {
+        calendar.isDate(day.date, inSameDayAs: Date())
+    }
+}
+
+private struct TimelineMonth: Identifiable {
+    let id: String
+    let date: Date
+    let monthTitle: String
+    let englishTitle: String
+    let leadingEmptyCount: Int
+    let days: [TimelineDay]
+
+    var totalItemCount: Int {
+        days.reduce(0) { $0 + $1.items.count }
+    }
+}
+
+private struct TimelineDay: Identifiable, Hashable {
+    let id: String
+    let date: Date
+    let day: Int
+    let items: [PhotoItem]
+}
+
+private struct TimeMachineDayDetailView: View {
+    let day: TimelineDay
+    @ObservedObject var viewModel: PhotoCleanupViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var previewItem: PhotoItem?
+
+    private let columns = [GridItem(.adaptive(minimum: 110), spacing: 10)]
+
+    private var dateTitle: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M月d日"
+        return formatter.string(from: day.date)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 10) {
+                    ForEach(day.items) { item in
+                        TimelinePhotoCell(item: item, viewModel: viewModel) {
+                            previewItem = item
+                        }
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
+            }
+            .navigationTitle("\(dateTitle)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+        }
         .fullScreenCover(item: $previewItem) { item in
             FullScreenPreviewView(item: item, viewModel: viewModel)
         }
@@ -155,8 +413,8 @@ private struct TimelinePhotoCell: View {
                 imageManager: viewModel.imageManager,
                 contentMode: .aspectFill
             )
-            .frame(height: 120)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .frame(height: 140)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .onTapGesture {
                 onTapPreview()
             }
@@ -172,11 +430,4 @@ private struct TimelinePhotoCell: View {
             .padding(8)
         }
     }
-}
-
-private struct TimelineSection: Identifiable {
-    let id: String
-    let title: String
-    let date: Date
-    let items: [PhotoItem]
 }
