@@ -125,15 +125,17 @@ struct TimeMachineView: View {
                                     onResetYear: {
                                         selectedYear = nil
                                     },
-                                    monthlyCount: currentMonthItemCount
+                                    featuredMonth: filteredMonths.first,
+                                    suggestedCount: viewModel.pendingDeletionItems.count
                                 )
                                 .padding(.horizontal, 20)
-                                .padding(.top, 20)
+                                .padding(.top, 10)
                                 .padding(.bottom, 12)
                                 .background(.thinMaterial)
                             }
                         }
                     }
+                    .ignoresSafeArea(edges: .top)
                     .background(
                         ZStack {
                             Image("all_album_bg")
@@ -187,83 +189,126 @@ private struct TimeMachineHeader: View {
     let years: [Int]
     let onSelectYear: (Int) -> Void
     let onResetYear: () -> Void
-    let monthlyCount: Int
+    let featuredMonth: TimelineMonth?
+    let suggestedCount: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Spacer()
-                Text("时光机")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundColor(.clear)
-                Spacer()
-            }
-            .overlay(alignment: .trailing) {
-                Menu {
-                    Button("全部年份") {
-                        onResetYear()
-                    }
-                    ForEach(years, id: \.self) { year in
-                        Button("\(year)年") {
-                            onSelectYear(year)
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(yearText)
-                            .font(.system(size: 13, weight: .bold))
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 10, weight: .bold))
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color(UIColor.systemGray5))
-                    .clipShape(Capsule())
-                    .foregroundColor(.secondary)
-                }
-            }
+        VStack(spacing: 14) {
+            Text("时光机")
+                .font(.system(size: 28, weight: .bold))
+                .foregroundColor(.clear)
 
-            HStack {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("本月待整理")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.8))
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text("\(monthlyCount)")
-                            .font(.system(size: 32, weight: .bold))
-                        Text("张")
-                            .font(.system(size: 14))
-                    }
-                    .foregroundColor(.white)
-                }
-                Spacer()
-                Circle()
-                    .fill(Color.white.opacity(0.25))
-                    .frame(width: 44, height: 44)
-                    .overlay(
-                        Image(systemName: "calendar")
-                            .foregroundColor(.white)
-                            .font(.system(size: 18, weight: .semibold))
-                    )
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 20)
-            .background(
-                LinearGradient(
-                    colors: [Color("brand-start"), Color("brand-end")],
-                    startPoint: .leading,
-                    endPoint: .trailing
+            if let featuredMonth {
+                TimeMachineHighlightCard(
+                    month: featuredMonth,
+                    suggestionCount: suggestedCount,
+                    totalCount: featuredMonth.totalItemCount,
+                    yearText: yearText,
+                    years: years,
+                    onSelectYear: onSelectYear,
+                    onResetYear: onResetYear
                 )
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .shadow(color: Color("brand-start").opacity(0.25), radius: 18, y: 8)
+            }
         }
-        .padding(.horizontal, 24)
-        .padding(.top, 18)
-        .padding(.bottom, 12)
-        .background(.thinMaterial)
     }
 }
+
+private struct TimeMachineHighlightCard: View {
+    let month: TimelineMonth
+    let suggestionCount: Int
+    let totalCount: Int
+    let yearText: String
+    let years: [Int]
+    let onSelectYear: (Int) -> Void
+    let onResetYear: () -> Void
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color("brand-start"), Color("brand-end")],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            )
+            .shadow(color: Color("brand-start").opacity(0.2), radius: 12, y: 6)
+
+            HStack {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 6) {
+                        Text(month.monthTitle)
+                            .font(.system(size: 23, weight: .bold))
+
+                        Menu {
+                            Button("全部年份") { onResetYear() }
+                            ForEach(years, id: \.self) { year in
+                                Button("\(year)年") { onSelectYear(year) }
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(yearText.replacingOccurrences(of: "年", with: ""))
+                                    .font(.system(size: 11, weight: .medium))
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 10, weight: .bold))
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color.black.opacity(0.15))
+                            .clipShape(Capsule())
+                        }
+                    }
+                    .foregroundColor(.white)
+
+                    HStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.white.opacity(0.2))
+                            .frame(width: 20, height: 20)
+                            .overlay(
+                                Image(systemName: "photo")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.white)
+                            )
+                        Text("本月拍摄 \(totalCount) 张")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.white.opacity(0.85))
+                    }
+                }
+
+                Spacer()
+
+                Button(action: {}) {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        HStack(spacing: 4) {
+                            Text("\(suggestionCount)")
+                                .font(.system(size: 22, weight: .bold))
+                                .foregroundColor(.yellow)
+                            Text("张")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                        Text("建议清理")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundColor(.white.opacity(0.8))
+                            .textCase(.uppercase)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Color.white.opacity(0.2))
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+        }
+        .frame(height: 108)
+    }
+}
+
+
 
 private struct MonthCalendarView: View {
     let month: TimelineMonth
