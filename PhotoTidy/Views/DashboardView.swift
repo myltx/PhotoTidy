@@ -10,22 +10,34 @@ struct DashboardView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 24) {
-                    headerSection
-                    heroCleanerCard
-                    smartCleanupTitle
-                    smartCleanupGrid
-                    Spacer(minLength: 40)
+            ZStack {
+                blurredBackground
+
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        Section {
+                            VStack(alignment: .leading, spacing: 24) {
+                                headerSection
+                                heroCleanerCard
+                                smartCleanupTitle
+                                smartCleanupGrid
+                                Spacer(minLength: 40)
+                            }
+                            .padding(.horizontal, 24)
+                            .padding(.top, 16)
+                            .padding(.bottom, 32)
+                        } header: {
+                            statusBarPlaceholder
+                                .padding(.horizontal, 20)
+                                .padding(.top, 20)
+                                .padding(.bottom, 10)
+                                .background(.thinMaterial)
+                        }
+                    }
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, 16)
-                .padding(.bottom, 32)
+                .ignoresSafeArea(edges: .top)
             }
-            .background(Color(UIColor.systemGroupedBackground))
-            .navigationTitle("首页")
-            .toolbarBackground(Color.clear, for: .navigationBar)
-            .toolbar(.hidden, for: .navigationBar)
+            .navigationBarHidden(true)
         }
     }
 }
@@ -335,6 +347,42 @@ private extension DashboardView {
             return "AI 正在分析中…"
         }
         return nil
+    }
+
+    var blurredBackground: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color.clear)
+                .overlay(
+                    Image("all_album_bg")
+                        .resizable()
+                        .scaledToFill()
+                )
+                .clipped()
+                .opacity(0.2)
+                .blur(radius: 16)
+                .ignoresSafeArea()
+
+            LinearGradient(
+                colors: [
+                    Color(UIColor.systemGray6).opacity(0.95),
+                    Color(UIColor.systemBackground).opacity(0.85)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        }
+    }
+
+    var statusBarPlaceholder: some View {
+        HStack {
+            Spacer()
+            Text("首页")
+                .font(.system(size: 28, weight: .bold))
+                .foregroundColor(.clear)
+            Spacer()
+        }
     }
 }
 
