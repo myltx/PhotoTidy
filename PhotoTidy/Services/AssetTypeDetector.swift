@@ -3,6 +3,38 @@ import UIKit
 import Photos
 import Vision
 import ImageIO
+import UniformTypeIdentifiers
+
+enum AssetKind {
+    case staticPhoto
+    case livePhoto
+    case gif
+    case video
+}
+
+func assetType(_ asset: PHAsset) -> AssetKind {
+    if asset.mediaType == .video {
+        return .video
+    }
+    if asset.mediaSubtypes.contains(.photoLive) {
+        return .livePhoto
+    }
+    if asset.mediaType == .image, isAnimatedGIF(asset: asset) {
+        return .gif
+    }
+    return .staticPhoto
+}
+
+private func isAnimatedGIF(asset: PHAsset) -> Bool {
+    let resources = PHAssetResource.assetResources(for: asset)
+    return resources.contains { resource in
+        let utiString = resource.uniformTypeIdentifier
+        if let utType = UTType(utiString) {
+            return utType == .gif
+        }
+        return false
+    }
+}
 
 /// 截图 / 文档 / 文字图片 / 普通照片 分类器
 /// - 完全本地：只使用 PhotoKit + Vision，不上传任何数据
