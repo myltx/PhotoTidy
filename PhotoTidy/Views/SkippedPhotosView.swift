@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SkippedPhotosView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
+    @Environment(\.dismiss) private var dismiss
     @State private var selectedSource: SkippedPhotoSource? = nil
     @State private var processedFilter: ProcessedFilter = .unprocessed
     @State private var isSelecting: Bool = false
@@ -9,69 +10,80 @@ struct SkippedPhotosView: View {
     @State private var showingClearAlert = false
     
     private let gridColumns = [
-        GridItem(.flexible(), spacing: 10),
-        GridItem(.flexible(), spacing: 10),
-        GridItem(.flexible(), spacing: 10)
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12)
     ]
     
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                filterBar
-                    .padding(.horizontal, 20)
-                    .padding(.top, 16)
+            ZStack(alignment: .bottom) {
+                Color(UIColor.systemGray6)
+                    .ignoresSafeArea()
                 
-                if entries.isEmpty {
-                    emptyState
-                        .padding(.top, 80)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
+                VStack(spacing: 0) {
+                    header
+                        .padding(.horizontal, 24)
+                        .padding(.top, 12)
+                        .padding(.bottom, 8)
+                        .background(.ultraThinMaterial)
+                    
                     ScrollView {
-                        LazyVGrid(columns: gridColumns, spacing: 12) {
-                            ForEach(entries) { entry in
-                                SkippedPhotoCell(
-                                    entry: entry,
-                                    isSelected: selection.contains(entry.record.photoId),
-                                    isSelecting: isSelecting,
-                                    viewModel: viewModel
-                                )
-                                .onTapGesture {
-                                    guard isSelecting else { return }
-                                    toggleSelection(for: entry.record.photoId)
+                        VStack(spacing: 18) {
+                            infoCard
+                                .padding(.horizontal, 24)
+                                .padding(.top, 8)
+                            
+                            filterBar
+                                .padding(.horizontal, 24)
+                            
+                            if groupedSections.isEmpty {
+                                emptyState
+                                    .padding(.top, 80)
+                                    .padding(.horizontal, 40)
+                            } else {
+                                ForEach(groupedSections) { section in
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        HStack {
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(section.title)
+                                                    .font(.system(size: 14, weight: .bold))
+                                                    .foregroundColor(.primary)
+                                                Text(section.sourceText)
+                                                    .font(.system(size: 10, weight: .medium))
+                                                    .foregroundColor(.secondary)
+                                            }
+                                            Spacer()
+                                        }
+                                        
+                                        LazyVGrid(columns: gridColumns, spacing: 12) {
+                                            ForEach(section.entries) { entry in
+                                                SkippedPhotoCell(
+                                                    entry: entry,
+                                                    isSelected: selection.contains(entry.record.photoId),
+                                                    isSelecting: isSelecting,
+                                                    viewModel: viewModel
+                                                )
+                                                .onTapGesture {
+                                                    guard isSelecting else { return }
+                                                    toggleSelection(for: entry.record.photoId)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    .padding(.horizontal, 24)
                                 }
                             }
-                        }
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 40)
-                    }
-                }
-            }
-            .navigationTitle("跳过中心")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button(isSelecting ? "完成" : "选择") {
-                        isSelecting.toggle()
-                        if !isSelecting {
-                            selection.removeAll()
+                            
+                            Color.clear.frame(height: 140)
                         }
                     }
-                    .disabled(entries.isEmpty)
+                    .scrollIndicators(.hidden)
                 }
                 
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("清空") {
-                        showingClearAlert = true
-                    }
-                    .disabled(viewModel.skippedPhotoRecords.isEmpty)
-                }
+                bottomActions
             }
-            .safeAreaInset(edge: .bottom) {
-                if isSelecting && !selection.isEmpty {
-                    selectionActions
-                } else {
-                    Color.clear.frame(height: 0)
-                }
-            }
+            .navigationBarHidden(true)
             .alert("清空全部跳过记录？", isPresented: $showingClearAlert) {
                 Button("取消", role: .cancel) {}
                 Button("清空", role: .destructive) {
@@ -81,12 +93,133 @@ struct SkippedPhotosView: View {
             } message: {
                 Text("仅会移除跳过记录，并不会修改照片或待删区。")
             }
+            .toolbar(.hidden, for: .tabBar)
         }
     }
     
+    private var header: some View {
+        HStack {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.primary)
+                    .frame(width: 44, height: 44)
+                    .background(Color.white)
+                    .clipShape(Circle())
+                    .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+            }
+            .buttonStyle(.plain)
+            
+            Spacer()
+            
+            Text("跳过中心")
+                .font(.system(size: 18, weight: .bold))
+            
+            Spacer()
+            
+            Button("清空") {
+                showingClearAlert = true
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundColor(.secondary)
+            .disabled(viewModel.skippedPhotoRecords.isEmpty)
+        }
+    }
+    
+    private var infoCard: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "info.circle.fill")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(Color.purple)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("\(unprocessedCount) 张待确认照片")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.primary)
+                Text("这些是你在智能清理、时光机等模式中选择“跳过”的照片，重新审视以确保没有遗漏。")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color.purple.opacity(0.12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(Color.purple.opacity(0.2), lineWidth: 1)
+                )
+        )
+    }
+    
+    private var bottomActions: some View {
+        VStack(spacing: 12) {
+            Divider()
+            HStack(spacing: 16) {
+                Menu {
+                    if !isSelecting {
+                        Button("进入选择模式") { enterSelectionMode() }
+                    } else {
+                        Button("标记已处理 (\(selection.count))") {
+                            viewModel.markSkippedRecordsProcessed(ids: Array(selection))
+                            selection.removeAll()
+                        }
+                        .disabled(selection.isEmpty)
+                        
+                        Button("删除选中 (\(selection.count))", role: .destructive) {
+                            viewModel.deleteSkippedRecords(ids: Array(selection))
+                            selection.removeAll()
+                        }
+                        .disabled(selection.isEmpty)
+                        
+                        Button("退出选择模式", role: .cancel) {
+                            exitSelectionMode()
+                        }
+                    }
+                } label: {
+                    Image(systemName: "list.bullet.rectangle.portrait")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundColor(.primary)
+                        .frame(width: 60, height: 60)
+                        .background(Color(UIColor.systemGray5))
+                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                }
+                
+                Button {
+                    startRevisit()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "play.fill")
+                        Text("开始重新审视 (\(unprocessedCount))")
+                            .font(.system(size: 15, weight: .bold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 60)
+                    .background(
+                        LinearGradient(
+                            colors: [Color("brand-start"), Color("brand-end")],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .foregroundColor(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .shadow(color: .black.opacity(0.15), radius: 20, y: 8)
+                }
+                .disabled(unprocessedCount == 0)
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 16)
+        }
+        .background(.ultraThinMaterial)
+    }
+    
     private var filterBar: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
                 Menu {
                     Button("全部来源") { selectedSource = nil }
                     Divider()
@@ -100,8 +233,8 @@ struct SkippedPhotosView: View {
                             .font(.system(size: 10, weight: .bold))
                     }
                     .font(.system(size: 12, weight: .semibold))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
                     .background(Color(UIColor.systemGray5))
                     .clipShape(Capsule())
                 }
@@ -123,51 +256,12 @@ struct SkippedPhotosView: View {
         }
     }
     
-    private var selectionActions: some View {
-        VStack {
-            Divider()
-            HStack(spacing: 12) {
-                Button {
-                    viewModel.markSkippedRecordsProcessed(ids: Array(selection))
-                    selection.removeAll()
-                } label: {
-                    HStack {
-                        Image(systemName: "checkmark.circle")
-                        Text("标记已处理")
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color(UIColor.systemGray6))
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                }
-                
-                Button {
-                    viewModel.deleteSkippedRecords(ids: Array(selection))
-                    selection.removeAll()
-                } label: {
-                    HStack {
-                        Image(systemName: "trash")
-                        Text("删除记录")
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .foregroundColor(.white)
-                    .background(Color.red)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            .background(.ultraThinMaterial)
-        }
-    }
+// remove section?
     
-    private var entries: [SkippedPhotoEntry] {
+    private var filteredEntries: [SkippedPhotoEntry] {
         viewModel.skippedPhotoRecords
             .filter { record in
-                if let source = selectedSource, record.source != source {
-                    return false
-                }
+                if let source = selectedSource, record.source != source { return false }
                 switch processedFilter {
                 case .all: return true
                 case .processed: return record.isProcessed
@@ -179,10 +273,32 @@ struct SkippedPhotosView: View {
                 return SkippedPhotoEntry(record: record, photo: item)
             }
     }
+
+    private var groupedSections: [SkippedSection] {
+        let calendar = Calendar.current
+        let groups = Dictionary(grouping: filteredEntries) { entry -> Date in
+            calendar.startOfDay(for: entry.record.timestamp)
+        }
+        
+        return groups.map { date, entries in
+            let title: String = {
+                if calendar.isDateInToday(date) { return "今天" }
+                if calendar.isDateInYesterday(date) { return "昨天" }
+                let formatter = DateFormatter()
+                formatter.locale = Locale(identifier: "zh_CN")
+                formatter.dateFormat = "M月d日"
+                return formatter.string(from: date)
+            }()
+            let sources = Set(entries.map { $0.record.source.title }).sorted()
+            let sourceText = sources.isEmpty ? "来自: --" : "来自: " + sources.joined(separator: "、")
+            return SkippedSection(date: date, title: title, sourceText: sourceText, entries: entries)
+        }
+        .sorted { $0.date > $1.date }
+    }
     
     private var summaryText: String {
-        let total = entries.count
-        let processed = entries.filter { $0.record.isProcessed }.count
+        let total = filteredEntries.count
+        let processed = filteredEntries.filter { $0.record.isProcessed }.count
         return "共 \(total) 项 · 已处理 \(processed) 项"
     }
     
@@ -201,11 +317,47 @@ struct SkippedPhotosView: View {
         }
     }
     
+    private var unprocessedCount: Int {
+        viewModel.skippedPhotoRecords.filter { !$0.isProcessed }.count
+    }
+    
     private func toggleSelection(for id: String) {
         if selection.contains(id) {
             selection.remove(id)
         } else {
             selection.insert(id)
+        }
+    }
+    
+    private func enterSelectionMode(selectAll: Bool = false) {
+        isSelecting = true
+        if selectAll {
+            selection = Set(filteredEntries.map { $0.record.photoId })
+        } else {
+            selection.removeAll()
+        }
+    }
+    
+    private func exitSelectionMode() {
+        isSelecting = false
+        selection.removeAll()
+    }
+    
+    private var unprocessedEntries: [SkippedPhotoEntry] {
+        viewModel.skippedPhotoRecords
+            .filter { !$0.isProcessed }
+            .compactMap { record in
+                let item = viewModel.items.first { $0.id == record.photoId }
+                return SkippedPhotoEntry(record: record, photo: item)
+            }
+    }
+    
+    private func startRevisit() {
+        guard unprocessedCount > 0 else { return }
+        selectedSource = nil
+        processedFilter = .unprocessed
+        DispatchQueue.main.async {
+            enterSelectionMode(selectAll: true)
         }
     }
     
@@ -231,6 +383,15 @@ private struct SkippedPhotoEntry: Identifiable {
     let photo: PhotoItem?
     
     var id: String { record.photoId }
+}
+
+private struct SkippedSection: Identifiable {
+    let date: Date
+    let title: String
+    let sourceText: String
+    let entries: [SkippedPhotoEntry]
+    
+    var id: TimeInterval { date.timeIntervalSince1970 }
 }
 
 private struct SkippedPhotoCell: View {

@@ -303,7 +303,7 @@ private extension SettingsView {
                         HStack(spacing: 12) {
                             dataIcon(background: Color.purple.opacity(0.12))
                                 .overlay(
-                                    Image(systemName: "square.stack.3d.down.forward")
+                                    Image(systemName: "arrow.counterclockwise")
                                         .font(.system(size: 13, weight: .semibold))
                                         .foregroundColor(Color.purple)
                                 )
@@ -325,6 +325,7 @@ private extension SettingsView {
                                 .foregroundColor(.secondary.opacity(0.4))
                         }
                     }
+                    .contentShape(Rectangle())
                     .padding(.horizontal, 18)
                     .padding(.vertical, 18)
                 }
