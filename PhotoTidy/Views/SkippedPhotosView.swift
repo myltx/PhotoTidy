@@ -32,57 +32,49 @@ struct SkippedPhotosView: View {
             Color(UIColor.systemGray6)
                 .ignoresSafeArea()
             
-            VStack(spacing: 0) {
-                header
-                    .padding(.horizontal, 24)
-                    .padding(.top, 12)
-                    .padding(.bottom, 8)
-                    .background(.ultraThinMaterial)
-                
-                ScrollView {
-                    VStack(spacing: 18) {
-                        infoCard
-                            .padding(.horizontal, 24)
-                            .padding(.top, 8)
-                        
-                        filterBar
-                            .padding(.horizontal, 24)
-                        
-                        if groupedSections.isEmpty {
-                            emptyState
-                                .padding(.top, 80)
-                                .padding(.horizontal, 40)
-                        } else {
-                            ForEach(groupedSections) { section in
-                                VStack(alignment: .leading, spacing: 12) {
-                                    HStack {
-                                        Text(section.title)
-                                            .font(.system(size: 14, weight: .bold))
-                                            .foregroundColor(.primary)
-                                        Spacer()
-                                    }
-                                    
-                                    VStack(alignment: .leading, spacing: 18) {
-                                        ForEach(section.sourceGroups) { group in
-                                            VStack(alignment: .leading, spacing: 8) {
-                                                Text(group.displayTitle)
-                                                    .font(.system(size: 11, weight: .semibold))
-                                                    .foregroundColor(.secondary)
-                                                LazyVGrid(columns: gridColumns, spacing: 12) {
-                                                    ForEach(group.entries) { entry in
-                                                        SkippedPhotoCell(
-                                                            entry: entry,
-                                                            isSelected: selection.contains(entry.record.photoId),
-                                                            isSelecting: isSelecting,
-                                                            viewModel: viewModel
-                                                        )
-                                                        .contentShape(Rectangle())
-                                                        .onTapGesture {
-                                                            if isSelecting {
-                                                                toggleSelection(for: entry.record.photoId)
-                                                            } else if let photo = entry.photo {
-                                                                previewItem = photo
-                                                            }
+            ScrollView {
+                VStack(spacing: 18) {
+                    infoCard
+                        .padding(.horizontal, 24)
+                        .padding(.top, 8)
+                    
+                    filterBar
+                        .padding(.horizontal, 24)
+                    
+                    if groupedSections.isEmpty {
+                        emptyState
+                            .padding(.top, 80)
+                            .padding(.horizontal, 40)
+                    } else {
+                        ForEach(groupedSections) { section in
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack {
+                                    Text(section.title)
+                                        .font(.system(size: 14, weight: .bold))
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 18) {
+                                    ForEach(section.sourceGroups) { group in
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            Text(group.displayTitle)
+                                                .font(.system(size: 11, weight: .semibold))
+                                                .foregroundColor(.secondary)
+                                            LazyVGrid(columns: gridColumns, spacing: 12) {
+                                                ForEach(group.entries) { entry in
+                                                    SkippedPhotoCell(
+                                                        entry: entry,
+                                                        isSelected: selection.contains(entry.record.photoId),
+                                                        isSelecting: isSelecting,
+                                                        viewModel: viewModel
+                                                    )
+                                                    .contentShape(Rectangle())
+                                                    .onTapGesture {
+                                                        if isSelecting {
+                                                            toggleSelection(for: entry.record.photoId)
+                                                        } else if let photo = entry.photo {
+                                                            previewItem = photo
                                                         }
                                                     }
                                                 }
@@ -93,12 +85,12 @@ struct SkippedPhotosView: View {
                                 .padding(.horizontal, 24)
                             }
                         }
-                        
-                        Color.clear.frame(height: 20)
                     }
+                    
+                    Color.clear.frame(height: 20)
                 }
-                .scrollIndicators(.hidden)
             }
+            .scrollIndicators(.hidden)
         }
         .alert("清空全部跳过记录？", isPresented: $showingClearAlert) {
             Button("取消", role: .cancel) {}
@@ -116,32 +108,27 @@ struct SkippedPhotosView: View {
         .fullScreenCover(item: $previewItem) { item in
             FullScreenPreviewView(item: item, viewModel: viewModel)
         }
-    }
-    
-    private var header: some View {
-        HStack {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(.primary)
-                    .frame(width: 44, height: 44)
-                    .background(Color(UIColor.systemBackground))
-                    .clipShape(Circle())
-                    .overlay(
-                        Circle().stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
-                    )
-                    .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+        .navigationTitle("待确认照片")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(.primary)
+                        .frame(width: 44, height: 44)
+                        .background(Color(UIColor.systemBackground))
+                        .clipShape(Circle())
+                        .overlay(
+                            Circle().stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+                        )
+                        .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
-            
-            Spacer()
-            
-            Text("跳过中心")
-                .font(.system(size: 18, weight: .bold))
-            
-            Spacer()
         }
     }
     
