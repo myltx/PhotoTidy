@@ -3,7 +3,7 @@ import SwiftUI
 struct SkippedPhotosView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedSource: SkippedPhotoSource? = nil
+    @State private var selectedCategory: SkippedSourceCategory? = nil
     @State private var isSelecting: Bool = false
     @State private var selection = Set<String>()
     @State private var showingClearAlert = false
@@ -43,33 +43,37 @@ struct SkippedPhotosView: View {
                                     .padding(.horizontal, 40)
                             } else {
                                 ForEach(groupedSections) { section in
-                                    VStack(alignment: .leading, spacing: 10) {
+                                    VStack(alignment: .leading, spacing: 12) {
                                         HStack {
-                                            VStack(alignment: .leading, spacing: 2) {
-                                                Text(section.title)
-                                                    .font(.system(size: 14, weight: .bold))
-                                                    .foregroundColor(.primary)
-                                                Text(section.sourceText)
-                                                    .font(.system(size: 10, weight: .medium))
-                                                    .foregroundColor(.secondary)
-                                            }
+                                            Text(section.title)
+                                                .font(.system(size: 14, weight: .bold))
+                                                .foregroundColor(.primary)
                                             Spacer()
                                         }
                                         
-                                        LazyVGrid(columns: gridColumns, spacing: 12) {
-                                            ForEach(section.entries) { entry in
-                                                SkippedPhotoCell(
-                                                    entry: entry,
-                                                    isSelected: selection.contains(entry.record.photoId),
-                                                    isSelecting: isSelecting,
-                                                    viewModel: viewModel
-                                                )
-                                                .contentShape(Rectangle())
-                                                .onTapGesture {
-                                                    if isSelecting {
-                                                        toggleSelection(for: entry.record.photoId)
-                                                    } else if let photo = entry.photo {
-                                                        previewItem = photo
+                                        VStack(alignment: .leading, spacing: 18) {
+                                            ForEach(section.sourceGroups) { group in
+                                                VStack(alignment: .leading, spacing: 8) {
+                                                    Text(group.displayTitle)
+                                                        .font(.system(size: 11, weight: .semibold))
+                                                        .foregroundColor(.secondary)
+                                                    LazyVGrid(columns: gridColumns, spacing: 12) {
+                                                        ForEach(group.entries) { entry in
+                                                            SkippedPhotoCell(
+                                                                entry: entry,
+                                                                isSelected: selection.contains(entry.record.photoId),
+                                                                isSelecting: isSelecting,
+                                                                viewModel: viewModel
+                                                            )
+                                                            .contentShape(Rectangle())
+                                                            .onTapGesture {
+                                                                if isSelecting {
+                                                                    toggleSelection(for: entry.record.photoId)
+                                                                } else if let photo = entry.photo {
+                                                                    previewItem = photo
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
@@ -241,14 +245,16 @@ struct SkippedPhotosView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
                 Menu {
-                    Button("全部来源") { selectedSource = nil }
-                    Divider()
-                    ForEach(SkippedPhotoSource.allCases) { source in
-                        Button(source.title) { selectedSource = source }
+                    Button("全部来源") { selectedCategory = nil }
+                    if !availableCategories.isEmpty {
+                        Divider()
+                    }
+                    ForEach(availableCategories) { category in
+                        Button(category.title) { selectedCategory = category }
                     }
                 } label: {
                     HStack(spacing: 6) {
-                        Text(selectedSource?.title ?? "全部来源")
+                        Text(selectedCategory?.title ?? "全部来源")
                         Image(systemName: "chevron.down")
                             .font(.system(size: 10, weight: .bold))
                     }
@@ -286,16 +292,21 @@ struct SkippedPhotosView: View {
                 .foregroundColor(.secondary)
         }
     }
-    
+
+    private var availableCategories: [SkippedSourceCategory] {
+        let categories = Set(viewModel.skippedPhotoRecords.map { $0.source.category })
+        return categories.sorted { $0.sortOrder < $1.sortOrder }
+    }
+
     private var filteredEntries: [SkippedPhotoEntry] {
         viewModel.skippedPhotoRecords
             .filter { record in
-                if let source = selectedSource, record.source != source { return false }
+                if let category = selectedCategory, record.source.category != category { return false }
                 return true
             }
             .compactMap { record in
                 let item = viewModel.items.first { $0.id == record.photoId }
-                return SkippedPhotoEntry(record: record, photo: item)
+                return SkippedPhotoEntry(record: record, photo: item, category: record.source.category)
             }
     }
 
@@ -314,11 +325,19 @@ struct SkippedPhotosView: View {
                 formatter.dateFormat = "M月d日"
                 return formatter.string(from: date)
             }()
-            let sources = Set(entries.map { $0.record.source.title }).sorted()
-            let sourceText = sources.isEmpty ? "来自: --" : "来自: " + sources.joined(separator: "、")
-            return SkippedSection(date: date, title: title, sourceText: sourceText, entries: entries)
+            let sourceGroups = groupedBySource(entries: entries)
+            return SkippedSection(date: date, title: title, sourceGroups: sourceGroups)
         }
         .sorted { $0.date > $1.date }
+    }
+
+    private func groupedBySource(entries: [SkippedPhotoEntry]) -> [SkippedSourceGroup] {
+        let groups = Dictionary(grouping: entries) { $0.category }
+        return groups.map { category, items in
+            let sortedItems = items.sorted { $0.record.timestamp > $1.record.timestamp }
+            return SkippedSourceGroup(category: category, entries: sortedItems)
+        }
+        .sorted { $0.category.sortOrder < $1.category.sortOrder }
     }
     
     private var summaryText: String {
@@ -372,6 +391,7 @@ struct SkippedPhotosView: View {
 private struct SkippedPhotoEntry: Identifiable {
     let record: SkippedPhotoRecord
     let photo: PhotoItem?
+    let category: SkippedSourceCategory
     
     var id: String { record.photoId }
 }
@@ -379,10 +399,17 @@ private struct SkippedPhotoEntry: Identifiable {
 private struct SkippedSection: Identifiable {
     let date: Date
     let title: String
-    let sourceText: String
-    let entries: [SkippedPhotoEntry]
+    let sourceGroups: [SkippedSourceGroup]
     
     var id: TimeInterval { date.timeIntervalSince1970 }
+}
+
+private struct SkippedSourceGroup: Identifiable {
+    let category: SkippedSourceCategory
+    let entries: [SkippedPhotoEntry]
+    
+    var id: String { category.id }
+    var displayTitle: String { "\(category.title) · \(entries.count) 张" }
 }
 
 private struct SkippedPhotoCell: View {
@@ -405,16 +432,9 @@ private struct SkippedPhotoCell: View {
             }
             
             VStack(alignment: .leading, spacing: 4) {
-                Text(entry.record.source.title)
-                    .font(.system(size: 9, weight: .bold))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(Color.black.opacity(0.4))
-                    .foregroundColor(.white)
-                    .clipShape(Capsule())
                 Text(shortTimestamp)
-                    .font(.system(size: 9))
-                    .foregroundColor(.white.opacity(0.9))
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.95))
             }
             .padding(8)
             

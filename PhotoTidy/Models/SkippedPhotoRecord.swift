@@ -28,6 +28,48 @@ enum SkippedPhotoSource: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum SkippedSourceCategory: String, CaseIterable, Identifiable {
+    case timeMachine
+    case smart
+    case similar
+    case other
+    
+    var id: String { rawValue }
+    
+    var title: String {
+        switch self {
+        case .timeMachine: return "时光机"
+        case .smart: return "全相册整理"
+        case .similar: return "相似照片"
+        case .other: return "其他来源"
+        }
+    }
+    
+    var sortOrder: Int {
+        switch self {
+        case .timeMachine: return 0
+        case .smart: return 1
+        case .similar: return 2
+        case .other: return 3
+        }
+    }
+}
+
+extension SkippedPhotoSource {
+    var category: SkippedSourceCategory {
+        switch self {
+        case .timeMachine:
+            return .timeMachine
+        case .smart:
+            return .smart
+        case .similar, .similarGroup:
+            return .similar
+        case .blurred, .screenshots, .documents, .large, .other:
+            return .other
+        }
+    }
+}
+
 struct SkippedPhotoRecord: Codable, Identifiable, Equatable {
     let photoId: String
     var timestamp: Date
