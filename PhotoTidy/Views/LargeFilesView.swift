@@ -6,6 +6,7 @@ struct LargeFilesView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var sortDescending: Bool = true
+    @State private var showingTrash: Bool = false
 
     private var largeItems: [PhotoItem] {
         let base = viewModel.items.filter { $0.isLargeFile }
@@ -14,6 +15,14 @@ struct LargeFilesView: View {
         }
         // 设计稿中展示“占用空间前 10 名”
         return Array(sorted.prefix(10))
+    }
+
+    private var selectedLargeItems: [PhotoItem] {
+        viewModel.pendingDeletionItems.filter { $0.isLargeFile }
+    }
+
+    private var selectedTotalSize: Int {
+        selectedLargeItems.reduce(0) { $0 + $1.fileSize }
     }
 
     var body: some View {
@@ -55,6 +64,14 @@ struct LargeFilesView: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showingTrash) {
+            TrashView(viewModel: viewModel)
+                .presentationDetents([.fraction(0.6), .large])
+                .presentationDragIndicator(.visible)
+        }
+        .safeAreaInset(edge: .bottom) {
+            selectionToolbar
         }
     }
 
@@ -134,21 +151,15 @@ struct LargeFilesView: View {
                                 .stroke(Color.white.opacity(0.4), lineWidth: 1)
                         )
 
-                    ZStack {
-                        Circle()
-                            .fill(isSelected ? Color("brand-start") : Color.clear)
-                            .overlay(
-                                Circle()
-                                    .stroke(Color.white.opacity(0.7), lineWidth: 2)
-                            )
-
-                        if isSelected {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(.white)
-                        }
+                    if isSelected {
+                        Text("已选择")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color("brand-start").opacity(0.7))
+                            .clipShape(Capsule())
                     }
-                    .frame(width: 26, height: 26)
                 }
                 .padding(.trailing, 10)
                 .padding(.bottom, 12)
@@ -156,6 +167,10 @@ struct LargeFilesView: View {
             }
             .background(Color(UIColor.systemGray5))
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(isSelected ? Color("brand-start") : Color.clear, lineWidth: 3)
+            )
             .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
         }
         .buttonStyle(.plain)
@@ -180,28 +195,29 @@ struct LargeFilesView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.asset.originalFilename)
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.primary)
                     if let date = item.creationDate {
                         Text(date.formatted(date: .abbreviated, time: .omitted))
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     }
                 }
+                .foregroundColor(isSelected ? Color("brand-start") : .primary)
 
                 Spacer()
 
-                HStack(spacing: 8) {
-                    Text(item.fileSize.fileSizeDescription)
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(Color("brand-start"))
-
-                    selectionIndicator(isSelected: isSelected)
-                }
+                Text(item.fileSize.fileSizeDescription)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(isSelected ? Color("brand-start") : .secondary)
             }
-            .padding(.vertical, 6)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(isSelected ? Color("brand-start").opacity(0.12) : Color(UIColor.secondarySystemBackground))
+            )
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(isSelected ? Color("brand-start").opacity(0.4) : Color.clear, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(isSelected ? Color("brand-start").opacity(0.6) : Color.black.opacity(0.05), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -221,22 +237,42 @@ struct LargeFilesView: View {
         return parts.joined(separator: " • ")
     }
     
-    private func selectionIndicator(isSelected: Bool) -> some View {
-        ZStack {
-            Circle()
-                .fill(isSelected ? Color("brand-start") : Color.clear)
-                .overlay(
-                    Circle()
-                        .stroke(isSelected ? Color("brand-start") : Color.secondary.opacity(0.4), lineWidth: 1.8)
-                )
-            
-            if isSelected {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 11, weight: .semibold))
+    @ViewBuilder
+    private var selectionToolbar: some View {
+        if selectedLargeItems.isEmpty {
+            Color.clear.frame(height: 0)
+        } else {
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("已选择 \(selectedLargeItems.count) 个大文件")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("总计 \(selectedTotalSize.fileSizeDescription)")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    showingTrash = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "trash")
+                        Text("查看待删")
+                    }
+                    .font(.system(size: 13, weight: .bold))
                     .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color("brand-start"))
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .background(.regularMaterial)
+            .shadow(color: .black.opacity(0.08), radius: 8, y: -2)
         }
-        .frame(width: 22, height: 22)
-        .animation(.easeInOut(duration: 0.15), value: isSelected)
     }
 }
