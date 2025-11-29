@@ -192,15 +192,7 @@ struct LargeFilesView: View {
                                 .stroke(Color.white.opacity(0.4), lineWidth: 1)
                         )
 
-                    if isSelected {
-                        Text("已选择")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(Color("brand-start").opacity(0.7))
-                            .clipShape(Capsule())
-                    }
+                    selectionIndicator(isSelected: isSelected)
                 }
                 .padding(.trailing, 10)
                 .padding(.bottom, 12)
@@ -246,9 +238,12 @@ struct LargeFilesView: View {
 
                 Spacer()
 
-                Text(item.fileSize.fileSizeDescription)
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(isSelected ? Color("brand-start") : .secondary)
+                HStack(spacing: 8) {
+                    Text(item.fileSize.fileSizeDescription)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(isSelected ? Color("brand-start") : .secondary)
+                    selectionIndicator(isSelected: isSelected)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -315,6 +310,23 @@ struct LargeFilesView: View {
             .background(.regularMaterial)
             .shadow(color: .black.opacity(0.08), radius: 8, y: -2)
         }
+    }
+    
+    private func selectionIndicator(isSelected: Bool) -> some View {
+        ZStack {
+            Circle()
+                .fill(isSelected ? Color("brand-start") : Color.clear)
+                .overlay(
+                    Circle()
+                        .stroke(isSelected ? Color("brand-start") : Color(UIColor.systemGray4), lineWidth: 1.8)
+                )
+            if isSelected {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white)
+            }
+        }
+        .frame(width: 24, height: 24)
     }
 }
     

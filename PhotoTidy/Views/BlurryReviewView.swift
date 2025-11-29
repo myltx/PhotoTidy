@@ -31,42 +31,37 @@ struct BlurryReviewView: View {
                     Spacer()
                 } else {
                     blurryGrid
-
-                    deleteButton
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 24)
                 }
             }
         }
-        .onAppear {
-            selectedIds = Set(blurryItems.map(\.id))
-        }
         .fullScreenCover(item: $previewItem) { item in
             FullScreenPreviewView(item: item, viewModel: viewModel)
+        }
+        .safeAreaInset(edge: .bottom) {
+            Group {
+                if blurryItems.isEmpty {
+                    Color.clear.frame(height: 0)
+                } else {
+                    blurryToolbar
+                }
+            }
         }
     }
 
     private var headerSection: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("已选中 \(selectedIds.count) 张")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-
-                Text("建议删除模糊、曝光异常的照片")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-            }
+            Text("建议删除模糊、曝光异常的照片")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
 
             Spacer()
 
-            Button(action: {
-                selectedIds = Set(blurryItems.map(\.id))
-            }) {
-                Text("全选")
+            Button(action: toggleSelectAll) {
+                Text(allSelected ? "取消全选" : "全选")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundColor(Color("brand-start"))
             }
+            .disabled(blurryItems.isEmpty)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 10)
@@ -105,6 +100,14 @@ struct BlurryReviewView: View {
                         }
                         .background(Color(UIColor.secondarySystemBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .stroke(isSelected ? Color("brand-start").opacity(0.6) : Color.clear, lineWidth: 1)
+                        )
+                        .background(
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .fill(isSelected ? Color("brand-start").opacity(0.12) : Color.clear)
+                        )
 
                         Button(action: { toggleSelection(item) }) {
                             ZStack {
@@ -148,21 +151,45 @@ struct BlurryReviewView: View {
         }
     }
 
-    private var deleteButton: some View {
-        Button {
-            applyDeletion()
-        } label: {
-            Text("删除选中 (\(selectedIds.count))")
-                .font(.system(size: 15, weight: .bold))
-                .foregroundColor(selectedIds.isEmpty ? .gray : .red)
-                .frame(maxWidth: .infinity)
-                .frame(height: 48)
-                .background(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(selectedIds.isEmpty ? Color(UIColor.systemGray5) : Color.red.opacity(0.08))
-                )
+    private var allSelected: Bool {
+        !blurryItems.isEmpty && selectedIds.count == blurryItems.count
+    }
+
+    private var selectedCount: Int { selectedIds.count }
+    
+    private var blurryToolbar: some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("已选择 \(selectedCount) 张")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("确认后移动至待删区")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            Button {
+                applyDeletion()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "trash")
+                    Text("删除选中")
+                }
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(selectedCount == 0 ? Color.gray : Color("brand-start"))
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(selectedCount == 0)
         }
-        .disabled(selectedIds.isEmpty)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .background(.regularMaterial)
+        .shadow(color: .black.opacity(0.08), radius: 8, y: -2)
     }
 
     private func toggleSelection(_ item: PhotoItem) {
@@ -178,5 +205,13 @@ struct BlurryReviewView: View {
             viewModel.setDeletion(item, to: selectedIds.contains(item.id))
         }
         dismiss()
+    }
+
+    private func toggleSelectAll() {
+        if allSelected {
+            selectedIds.removeAll()
+        } else {
+            selectedIds = Set(blurryItems.map(\.id))
+        }
     }
 }

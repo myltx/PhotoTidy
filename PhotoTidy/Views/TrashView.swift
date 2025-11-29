@@ -21,38 +21,33 @@ struct TrashView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .bottom) {
-                Color(UIColor.systemGray6).ignoresSafeArea()
+            Color(UIColor.systemGray6)
+                .overlay(
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 16) {
+                            summary
 
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 16) {
-                        summary
-
-                        if items.isEmpty {
-                            emptyState
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 80)
-                        } else {
-                            LazyVGrid(columns: gridColumns, spacing: 12) {
-                                ForEach(items, id: \.id) { item in
-                                    TrashPreviewCell(item: item, viewModel: viewModel)
+                            if items.isEmpty {
+                                emptyState
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 80)
+                            } else {
+                                LazyVGrid(columns: gridColumns, spacing: 12) {
+                                    ForEach(items, id: \.id) { item in
+                                        TrashPreviewCell(item: item, viewModel: viewModel)
+                                    }
                                 }
+                                .padding(.top, 8)
                             }
-                            .padding(.top, 8)
+
+                            Spacer(minLength: 40)
                         }
-
-                        Spacer(minLength: 40)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 16)
+                        .padding(.bottom, 120)
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.top, 16)
-                    .padding(.bottom, 150)
-                }
-
-                if !items.isEmpty {
-                    floatingConfirmButton
-                        .padding(.bottom, 34)
-                }
-            }
+                )
+                .ignoresSafeArea()
             .navigationTitle("待删区")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -76,6 +71,13 @@ struct TrashView: View {
                     }
                     .disabled(items.isEmpty)
                 }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if !items.isEmpty {
+                confirmToolbar
+            } else {
+                Color.clear.frame(height: 0)
             }
         }
         .alert("清空待删区？", isPresented: $showingClearAllAlert) {
@@ -136,32 +138,36 @@ struct TrashView: View {
         .padding(.top, 80)
     }
 
-    private var floatingConfirmButton: some View {
-        VStack(spacing: 12) {
-            Button(action: {
-                showingConfirmAlert = true
-            }) {
+    private var confirmToolbar: some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("已选择 \(items.count) 项")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("总计 \(totalSizeText)")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            Button(action: { showingConfirmAlert = true }) {
                 HStack {
                     Image(systemName: "trash.fill")
-                    Text("确认删除 (\(items.count))")
+                    Text("确认删除")
                 }
-                .font(.headline.weight(.bold))
-                .padding()
-                .frame(maxWidth: .infinity)
-                .background(Color("brand-start"))
+                .font(.system(size: 13, weight: .bold))
                 .foregroundColor(.white)
-                .cornerRadius(16)
-                .shadow(color: Color("brand-start").opacity(0.3), radius: 10, y: 5)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(Color("brand-start"))
+                .clipShape(Capsule())
             }
-            Button("关闭") {
-                dismiss()
-            }
-            .font(.subheadline.bold())
-            .foregroundColor(.secondary)
+            .disabled(items.isEmpty || isDeleting)
         }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 8)
-        .disabled(items.isEmpty || isDeleting)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .background(.regularMaterial)
+        .shadow(color: .black.opacity(0.08), radius: 8, y: -2)
     }
     
     private func initiateDeletion() {

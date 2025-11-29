@@ -6,6 +6,7 @@ struct ScreenshotDocumentView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var filterIndex: Int = 0 // 0 = 全部, 1 = 票据/文档, 2 = 文字图片
+    @State private var showingTrash = false
 
     private var docs: [PhotoItem] {
         viewModel.items.filter { $0.isScreenshot || $0.isDocumentLike || $0.isTextImage }
@@ -44,7 +45,20 @@ struct ScreenshotDocumentView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
+                    .padding(.bottom, 80)
                 }
+            }
+        }
+        .sheet(isPresented: $showingTrash) {
+            TrashView(viewModel: viewModel)
+                .presentationDetents([.fraction(0.6), .large])
+                .presentationDragIndicator(.visible)
+        }
+        .safeAreaInset(edge: .bottom) {
+            if selectedDocsCount > 0 {
+                screenshotToolbar
+            } else {
+                Color.clear.frame(height: 0)
             }
         }
     }
@@ -130,16 +144,16 @@ struct ScreenshotDocumentView: View {
             .padding(10)
             .background(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color(UIColor.secondarySystemBackground))
-                    .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .stroke(
-                                isSelected ? Color("brand-start").opacity(0.3) : Color.clear,
-                                lineWidth: 1
-                            )
+                    .fill(isSelected ? Color("brand-start").opacity(0.12) : Color(UIColor.secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(
+                        isSelected ? Color("brand-start").opacity(0.6) : Color.clear,
+                        lineWidth: 1
                     )
             )
+            .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
         }
         .buttonStyle(.plain)
     }
@@ -159,5 +173,43 @@ struct ScreenshotDocumentView: View {
         } else {
             return isDoc ? "文档" : (item.isScreenshot ? "截图" : "未知时间")
         }
+    }
+
+    private var selectedDocsCount: Int {
+        viewModel.pendingDeletionItems.filter { $0.isScreenshot || $0.isDocumentLike || $0.isTextImage }.count
+    }
+
+    private var screenshotToolbar: some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("已选择 \(selectedDocsCount) 项")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("查看待删区以统一处理")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            Button {
+                showingTrash = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "trash")
+                    Text("查看待删")
+                }
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(Color("brand-start"))
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .background(.regularMaterial)
+        .shadow(color: .black.opacity(0.08), radius: 8, y: -2)
     }
 }
