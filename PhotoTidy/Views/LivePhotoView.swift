@@ -10,6 +10,7 @@ struct LivePhotoView: UIViewRepresentable {
         let view = PHLivePhotoView()
         view.contentMode = .scaleAspectFit
         view.clipsToBounds = true
+        view.isMuted = false
         view.delegate = context.coordinator
         return view
     }
@@ -31,10 +32,8 @@ struct LivePhotoView: UIViewRepresentable {
         ) { livePhoto, _ in
             uiView.livePhoto = livePhoto
             if let livePhoto {
-                uiView.startPlayback(with: .hint)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    uiView.startPlayback(with: .full)
-                }
+                uiView.isMuted = false
+                uiView.startPlayback(with: .full)
             }
         }
     }
