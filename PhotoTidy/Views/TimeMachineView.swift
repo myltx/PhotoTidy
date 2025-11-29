@@ -239,22 +239,23 @@ private struct MonthBadge: View {
     let highlighted: Bool
 
     var body: some View {
-        VStack(spacing: 3) {
-            Text(String(format: "%02d", month))
-                .font(.system(size: 18, weight: .bold))
-            Text(englishTitle.uppercased())
-                .font(.system(size: 9, weight: .semibold))
+        ZStack {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(highlighted ? Color("brand-start").opacity(0.18) : Color(UIColor.secondarySystemBackground))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(Color.black.opacity(highlighted ? 0.15 : 0.08), lineWidth: 0.8)
+                )
+                .shadow(color: Color.black.opacity(0.08), radius: 3, y: 1)
+            VStack(spacing: 3) {
+                Text(String(format: "%02d", month))
+                    .font(.system(size: 18, weight: .bold))
+                Text(englishTitle.uppercased())
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .foregroundColor(highlighted ? Color("brand-start") : .primary)
         }
-        .frame(width: 50, height: 56)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(highlighted ? Color("brand-start").opacity(0.12) : Color(UIColor.secondarySystemBackground))
-        )
-        .foregroundColor(highlighted ? Color("brand-start") : .secondary)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(highlighted ? Color("brand-start").opacity(0.4) : Color.clear, lineWidth: 1)
-        )
+        .frame(width: 52, height: 56)
     }
 }
 
@@ -447,13 +448,13 @@ private struct StandardMonthCard: View {
         .padding(18)
         .background(
             RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .fill(Color(UIColor.systemBackground))
+                .fill(Color(UIColor.secondarySystemBackground))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .stroke(Color.black.opacity(0.04), lineWidth: 1)
+                .stroke(Color.black.opacity(0.08), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.05), radius: 6, y: 3)
+        .shadow(color: Color.black.opacity(0.06), radius: 8, y: 4)
     }
 }
 
