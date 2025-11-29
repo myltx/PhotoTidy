@@ -1,12 +1,10 @@
 import Foundation
 
-/// 负责读取/写入本地清理进度的存储器（使用 UserDefaults，仅本地持久化）
-final class CleanupProgressStore {
-    static let shared = CleanupProgressStore()
-
+/// 存储时光机月份进度，包含处理进度与选择状态，仅本地持久化
+final class TimeMachineProgressStore {
     private let storageKey = "cleanup_progress_records"
     private let defaults: UserDefaults
-    private var cache: [String: CleanupProgress]
+    private var cache: [String: TimeMachineMonthProgress]
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private let lock = NSLock()
@@ -15,7 +13,7 @@ final class CleanupProgressStore {
         self.defaults = userDefaults
         if
             let data = defaults.data(forKey: storageKey),
-            let decoded = try? decoder.decode([String: CleanupProgress].self, from: data)
+            let decoded = try? decoder.decode([String: TimeMachineMonthProgress].self, from: data)
         {
             self.cache = decoded
         } else {
@@ -23,24 +21,13 @@ final class CleanupProgressStore {
         }
     }
 
-    func save(_ progress: CleanupProgress) {
-        lock.lock()
-        if progress.isMeaningful {
-            cache[progress.key] = progress
-        } else {
-            cache.removeValue(forKey: progress.key)
-        }
-        persistLocked()
-        lock.unlock()
-    }
-
-    func progress(year: Int, month: Int) -> CleanupProgress? {
+    func progress(year: Int, month: Int) -> TimeMachineMonthProgress? {
         lock.lock()
         defer { lock.unlock() }
         return cache[Self.key(year: year, month: month)]
     }
 
-    func allProgresses() -> [CleanupProgress] {
+    func allProgresses() -> [TimeMachineMonthProgress] {
         lock.lock()
         let values = Array(cache.values)
         lock.unlock()
@@ -91,10 +78,10 @@ final class CleanupProgressStore {
         lock.unlock()
     }
 
-    private func modifyProgress(year: Int, month: Int, _ updater: (inout CleanupProgress) -> Void) {
+    private func modifyProgress(year: Int, month: Int, _ updater: (inout TimeMachineMonthProgress) -> Void) {
         lock.lock()
         let key = Self.key(year: year, month: month)
-        var progress = cache[key] ?? CleanupProgress(year: year, month: month)
+        var progress = cache[key] ?? TimeMachineMonthProgress(year: year, month: month)
         updater(&progress)
         if progress.isMeaningful {
             cache[key] = progress

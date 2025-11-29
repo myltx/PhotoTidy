@@ -113,7 +113,7 @@ private extension DashboardView {
 
     var heroCleanerCard: some View {
         Group {
-            if let info = viewModel.cleanupResumeInfo {
+            if let info = viewModel.smartCleanupResumeInfo {
                 resumeHeroCard(info: info)
             } else {
                 startHeroCard
@@ -197,7 +197,7 @@ private extension DashboardView {
         }
     }
     
-    private func resumeHeroCard(info: PhotoCleanupViewModel.CleanupResumeInfo) -> some View {
+    private func resumeHeroCard(info: PhotoCleanupViewModel.SmartCleanupResumeInfo) -> some View {
         ZStack(alignment: .bottomLeading) {
             Image("all_album_bg")
                 .resizable()
@@ -227,7 +227,7 @@ private extension DashboardView {
                     .font(.system(size: 24, weight: .bold))
                     .foregroundColor(.white)
 
-                if let dateText = formattedResumeDate(info.lastStopDate) {
+                if let dateText = formattedResumeDate(info.anchorPhoto?.creationDate) {
                     HStack(spacing: 6) {
                         Image(systemName: "clock.arrow.circlepath")
                             .font(.system(size: 12, weight: .bold))
@@ -244,7 +244,7 @@ private extension DashboardView {
                 HStack(spacing: 12) {
                     Button {
                         guard !viewModel.isLoading else { return }
-                        viewModel.showCleaner(filter: .all)
+                        viewModel.resumeSmartCleanup()
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "play.fill")
@@ -478,7 +478,8 @@ private extension DashboardView {
         count > 0 ? "待删区中有 \(count) 张照片，记得尽快确认删除" : "等待你的下一次整理"
     }
     
-    private func formattedResumeDate(_ date: Date) -> String? {
+    private func formattedResumeDate(_ date: Date?) -> String? {
+        guard let date else { return nil }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "yyyy年 M月d日"

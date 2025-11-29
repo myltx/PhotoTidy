@@ -1,7 +1,7 @@
 import Foundation
 
-/// 描述单个月份的整理进度与用户操作记录
-struct CleanupProgress: Codable, Equatable {
+/// 时光机模块使用的单个月份整理进度
+struct TimeMachineMonthProgress: Codable, Equatable {
     let year: Int
     let month: Int
     var processedCount: Int

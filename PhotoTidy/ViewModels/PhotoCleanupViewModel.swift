@@ -36,12 +36,18 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     @Published var isShowingSuccessSummary: Bool = false
     
     @Published var currentFilter: CleanupFilterMode = .all
-    @Published var currentIndex: Int = 0
+    @Published var currentIndex: Int = 0 {
+        didSet {
+            captureSmartCleanupAnchor()
+        }
+    }
     private var activeMonthContext: (year: Int, month: Int)?
 
     // Services
     let imageManager = PHCachingImageManager()
-    private let progressStore: CleanupProgressStore
+    private let timeMachineProgressStore: TimeMachineProgressStore
+    private let smartCleanupProgressStore: SmartCleanupProgressStore
+    @Published private(set) var smartCleanupProgress: SmartCleanupProgress?
     private let analysisCache: PhotoAnalysisCacheStore
     private var assetsFetchResult: PHFetchResult<PHAsset>?
     private var cancellable: AnyCancellable?
@@ -53,32 +59,34 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     var nextItem: PhotoItem? { sessionItems[safe: currentIndex + 1] }
     var thirdItem: PhotoItem? { sessionItems[safe: currentIndex + 2] }
     
-    struct CleanupResumeInfo {
-        let lastStopDate: Date
+    struct SmartCleanupResumeInfo {
+        let lastCategory: CleanupFilterMode
+        let anchorPhoto: PhotoItem?
         let pendingDeletionCount: Int
     }
     
-    var cleanupResumeInfo: CleanupResumeInfo? {
-        let progresses = progressStore.allProgresses()
-        guard !progresses.isEmpty else { return nil }
-        let sorted = progresses.sorted {
-            if $0.year == $1.year {
-                return $0.month > $1.month
+    var smartCleanupResumeInfo: SmartCleanupResumeInfo? {
+        let pendingCount = pendingDeletionItems.count
+        if let progress = smartCleanupProgress {
+            let hasPending = pendingCount > 0 || progress.hasPendingItems
+            if progress.lastPhotoId == nil && !hasPending {
+                return nil
             }
-            return $0.year > $1.year
-        }
-        for progress in sorted {
-            guard progress.processedCount > 0 else { continue }
-            let monthItems = monthItems(year: progress.year, month: progress.month)
-            guard !monthItems.isEmpty else { continue }
-            let index = min(progress.processedCount, monthItems.count) - 1
-            guard index >= 0 else { continue }
-            if let date = monthItems[index].creationDate {
-                return CleanupResumeInfo(
-                    lastStopDate: date,
-                    pendingDeletionCount: pendingDeletionItems.count
-                )
+            let anchorPhoto = progress.lastPhotoId.flatMap { id in
+                items.first { $0.id == id }
             }
+            let resolvedPending = pendingCount > 0 ? pendingCount : (progress.hasPendingItems ? max(1, pendingCount) : pendingCount)
+            return SmartCleanupResumeInfo(
+                lastCategory: progress.lastCategory,
+                anchorPhoto: anchorPhoto,
+                pendingDeletionCount: resolvedPending
+            )
+        } else if pendingCount > 0 {
+            return SmartCleanupResumeInfo(
+                lastCategory: .all,
+                anchorPhoto: nil,
+                pendingDeletionCount: pendingCount
+            )
         }
         return nil
     }
@@ -96,11 +104,14 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     // MARK: - Initialization
     
     init(
-        progressStore: CleanupProgressStore = .shared,
+        timeMachineProgressStore: TimeMachineProgressStore = TimeMachineProgressStore(),
+        smartCleanupProgressStore: SmartCleanupProgressStore = SmartCleanupProgressStore(),
         analysisCache: PhotoAnalysisCacheStore = PhotoAnalysisCacheStore()
     ) {
         self.analysisCache = analysisCache
-        self.progressStore = progressStore
+        self.timeMachineProgressStore = timeMachineProgressStore
+        self.smartCleanupProgressStore = smartCleanupProgressStore
+        self.smartCleanupProgress = smartCleanupProgressStore.load()
         super.init()
         PHPhotoLibrary.shared().register(self)
         refreshDeviceStorageUsage()
@@ -148,8 +159,17 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     
     func showCleaner(filter: CleanupFilterMode) {
         activeMonthContext = nil
-        updateSessionItems(for: filter)
         isShowingCleaner = true
+        updateSessionItems(for: filter)
+    }
+
+    func resumeSmartCleanup() {
+        let category = smartCleanupProgress?.lastCategory ?? .all
+        showCleaner(filter: category)
+        if let anchorId = smartCleanupProgress?.lastPhotoId,
+           let index = sessionItems.firstIndex(where: { $0.id == anchorId }) {
+            currentIndex = index
+        }
     }
 
     func showCleaner(forMonth year: Int, month: Int) {
@@ -259,6 +279,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
                 self.applyCachedAnalysis(to: &restoredItems)
                 self.items = restoredItems
                 self.isLoading = false
+                self.syncSmartCleanupPendingFlag()
                 self.updateSessionItems(for: .all)
                 self.analyzeAllItemsInBackground()
             }
@@ -594,6 +615,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         if let index = items.firstIndex(where: { $0.id == currentItem.id }) {
             items[index].markedForDeletion = true
             persistSelectionState(for: items[index])
+            syncSmartCleanupPendingFlag()
         }
         moveToNext()
     }
@@ -616,6 +638,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         if let index = items.firstIndex(where: { $0.id == item.id }) {
             items[index].markedForDeletion.toggle()
             persistSelectionState(for: items[index])
+            syncSmartCleanupPendingFlag()
             refreshSession() // Refresh session to exclude已删除
         }
     }
@@ -624,6 +647,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         if let index = items.firstIndex(where: { $0.id == item.id }) {
             items[index].markedForDeletion = flag
             persistSelectionState(for: items[index])
+            syncSmartCleanupPendingFlag()
             refreshSession()
         }
     }
@@ -632,6 +656,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         if let index = items.firstIndex(where: { $0.id == item.id }) {
             items[index].markedForDeletion = false
             persistSelectionState(for: items[index])
+            syncSmartCleanupPendingFlag()
             refreshSession()
         }
     }
@@ -646,12 +671,14 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             }
         }
         if updated {
+            syncSmartCleanupPendingFlag()
             refreshSession()
         }
     }
     
     func resetCleanupProgress() {
-        progressStore.resetAll()
+        timeMachineProgressStore.resetAll()
+        storeSmartCleanupProgress(nil)
         activeMonthContext = nil
         currentIndex = 0
         rebuildMonthStatuses(with: items)
@@ -730,6 +757,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
                     self.items.removeAll { toDeleteIds.contains($0.id) }
                     self.revalidateSimilarGroups()
                     self.refreshSession()
+                    self.syncSmartCleanupPendingFlag()
                     // 触发成功页面
                     self.presentSuccessSummary()
                 }
@@ -762,7 +790,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         guard var status = monthStatuses[key] else { return }
         status.userCleaned = cleaned
         monthStatuses[key] = status
-        progressStore.setMonthCleaned(year: year, month: month, cleaned: cleaned)
+        timeMachineProgressStore.setMonthCleaned(year: year, month: month, cleaned: cleaned)
     }
 
     func computeMonthStatus(photos: [PhotoItem]) -> MonthStatus {
@@ -795,7 +823,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             var status = computeMonthStatus(photos: photos)
             if
                 let comps = components(fromMonthKey: key),
-                let persisted = progressStore.progress(year: comps.year, month: comps.month)
+                let persisted = timeMachineProgressStore.progress(year: comps.year, month: comps.month)
             {
                 status.userCleaned = persisted.isMarkedCleaned
             } else if let existing = monthStatuses[key] {
@@ -810,7 +838,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     private func rebuildMonthSession(year: Int, month: Int) {
         sessionItems = monthItems(year: year, month: month)
         currentFilter = .all
-        let storedProgress = progressStore.progress(year: year, month: month)?.processedCount ?? 0
+        let storedProgress = timeMachineProgressStore.progress(year: year, month: month)?.processedCount ?? 0
         currentIndex = min(storedProgress, sessionItems.count)
     }
 
@@ -818,7 +846,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         for index in items.indices {
             guard
                 let comps = monthComponents(for: items[index]),
-                let progress = progressStore.progress(year: comps.year, month: comps.month)
+                let progress = timeMachineProgressStore.progress(year: comps.year, month: comps.month)
             else { continue }
             if progress.selectedPhotoIds.contains(items[index].id) {
                 items[index].markedForDeletion = true
@@ -887,27 +915,66 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         guard let data else { return nil }
         return try? NSKeyedUnarchiver.unarchivedObject(ofClass: VNFeaturePrintObservation.self, from: data)
     }
+    
+    private func storeSmartCleanupProgress(_ progress: SmartCleanupProgress?) {
+        smartCleanupProgress = progress
+        smartCleanupProgressStore.save(progress)
+    }
+
+    private func captureSmartCleanupAnchor() {
+        guard activeMonthContext == nil, isShowingCleaner else { return }
+        let hasPending = !pendingDeletionItems.isEmpty
+        let anchorId = currentItem?.id
+        if anchorId == nil, !hasPending {
+            storeSmartCleanupProgress(nil)
+            return
+        }
+        var progress = smartCleanupProgress ?? SmartCleanupProgress(lastCategoryRawValue: currentFilter.rawValue)
+        progress.lastCategoryRawValue = currentFilter.rawValue
+        progress.lastPhotoId = anchorId
+        progress.hasPendingItems = hasPending
+        progress.lastUpdatedAt = Date()
+        storeSmartCleanupProgress(progress)
+    }
+
+    private func syncSmartCleanupPendingFlag() {
+        let hasPending = !pendingDeletionItems.isEmpty
+        if hasPending {
+            var progress = smartCleanupProgress ?? SmartCleanupProgress(lastCategoryRawValue: currentFilter.rawValue)
+            progress.hasPendingItems = true
+            progress.lastUpdatedAt = Date()
+            storeSmartCleanupProgress(progress)
+        } else if var progress = smartCleanupProgress {
+            progress.hasPendingItems = false
+            progress.lastUpdatedAt = Date()
+            if progress.lastPhotoId == nil {
+                storeSmartCleanupProgress(nil)
+            } else {
+                storeSmartCleanupProgress(progress)
+            }
+        }
+    }
 
     private func persistSelectionState(for item: PhotoItem) {
         guard let comps = monthComponents(for: item) else { return }
-        progressStore.setPhoto(item.id, year: comps.year, month: comps.month, markedForDeletion: item.markedForDeletion)
+        timeMachineProgressStore.setPhoto(item.id, year: comps.year, month: comps.month, markedForDeletion: item.markedForDeletion)
     }
 
     private func recordSkip(for item: PhotoItem) {
         guard let comps = monthComponents(for: item) else { return }
-        progressStore.recordSkip(item.id, year: comps.year, month: comps.month)
+        timeMachineProgressStore.recordSkip(item.id, year: comps.year, month: comps.month)
     }
 
     private func clearStoredRecords(for items: [PhotoItem]) {
         for item in items {
             guard let comps = monthComponents(for: item) else { continue }
-            progressStore.removePhotoRecords(item.id, year: comps.year, month: comps.month)
+            timeMachineProgressStore.removePhotoRecords(item.id, year: comps.year, month: comps.month)
         }
     }
 
     private func updateMonthProgressIfNeeded(newValue: Int) {
         guard let context = activeMonthContext else { return }
-        progressStore.updateProcessedCount(year: context.year, month: context.month, to: newValue)
+        timeMachineProgressStore.updateProcessedCount(year: context.year, month: context.month, to: newValue)
     }
 
     private func monthComponents(for item: PhotoItem) -> (year: Int, month: Int)? {
