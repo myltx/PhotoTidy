@@ -7,6 +7,7 @@ import SwiftUI
 struct DashboardView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
     var onShowTrash: (() -> Void)? = nil
+    @State private var showingResumeResetAlert = false
 
     var body: some View {
         NavigationStack {
@@ -38,6 +39,14 @@ struct DashboardView: View {
                 .ignoresSafeArea(edges: .top)
             }
             .navigationBarHidden(true)
+        }
+        .alert("确定重置清理进度？", isPresented: $showingResumeResetAlert) {
+            Button("取消", role: .cancel) {}
+            Button("重置", role: .destructive) {
+                viewModel.resetCleanupProgress()
+            }
+        } message: {
+            Text("清除所有整理进度与选择记录，重新开始全相册整理。")
         }
     }
 }
@@ -103,15 +112,23 @@ private extension DashboardView {
     }
 
     var heroCleanerCard: some View {
+        Group {
+            if let info = viewModel.cleanupResumeInfo {
+                resumeHeroCard(info: info)
+            } else {
+                startHeroCard
+            }
+        }
+    }
+    
+    private var startHeroCard: some View {
         ZStack(alignment: .bottomLeading) {
-            // 背景图：改为使用本地 Assets，避免依赖网络
             Image("all_album_bg")
                 .resizable()
                 .scaledToFill()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
 
-            // 底部向上的渐变遮罩，增强文字可读性
             LinearGradient(
                 colors: [Color.black.opacity(0.85), Color.clear],
                 startPoint: .bottom,
@@ -127,7 +144,7 @@ private extension DashboardView {
                     .foregroundColor(.white)
                     .clipShape(Capsule())
 
-                Text("全相册整理")
+                Text("开始全相册整理")
                     .font(.title2).bold()
                     .foregroundColor(.white)
 
@@ -153,7 +170,7 @@ private extension DashboardView {
                                 Image(systemName: "play.fill")
                                     .font(.system(size: 12, weight: .bold))
                                     .foregroundColor(Color("brand-start"))
-                                Text("开始")
+                                Text("立即开始")
                                     .font(.system(size: 12, weight: .bold))
                             }
                             .foregroundColor(.primary)
@@ -168,6 +185,100 @@ private extension DashboardView {
                 .disabled(viewModel.isLoading)
             }
             .padding(.leading, 20)
+            .padding(.bottom, 28)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 240)
+        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .shadow(color: .black.opacity(0.25), radius: 18, y: 10)
+        .onTapGesture {
+            guard !viewModel.isLoading else { return }
+            viewModel.showCleaner(filter: .all)
+        }
+    }
+    
+    private func resumeHeroCard(info: PhotoCleanupViewModel.CleanupResumeInfo) -> some View {
+        ZStack(alignment: .bottomLeading) {
+            Image("all_album_bg")
+                .resizable()
+                .scaledToFill()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                .overlay(Color.black.opacity(0.3))
+
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0.9),
+                    Color.black.opacity(0.4),
+                    Color.clear
+                ],
+                startPoint: .bottom,
+                endPoint: .top
+            )
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    statusBadge
+                    Spacer()
+                    pendingBadge(count: info.pendingDeletionCount)
+                }
+
+                Text("继续上次进度")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.white)
+
+                if let dateText = formattedResumeDate(info.lastStopDate) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 12, weight: .bold))
+                        Text("上次停留：\(dateText)")
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Color("brand-start").opacity(0.9))
+                }
+
+                Text(resumeSubtitle(count: info.pendingDeletionCount))
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.75))
+
+                HStack(spacing: 12) {
+                    Button {
+                        guard !viewModel.isLoading else { return }
+                        viewModel.showCleaner(filter: .all)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 12, weight: .bold))
+                            Text(viewModel.isLoading ? "准备中…" : "继续")
+                                .font(.system(size: 13, weight: .bold))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.white)
+                        .foregroundColor(Color("brand-start"))
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .shadow(color: .black.opacity(0.2), radius: 10, y: 6)
+                    }
+                    .disabled(viewModel.isLoading)
+
+                    Button {
+                        showingResumeResetAlert = true
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 48, height: 44)
+                            .background(Color.white.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                            )
+                    }
+                }
+                .padding(.top, 8)
+            }
+            .padding(.horizontal, 24)
             .padding(.bottom, 28)
         }
         .frame(maxWidth: .infinity)
@@ -328,6 +439,50 @@ private extension DashboardView {
             return "建议清理 \(bytes.fileSizeDescription)"
         }
         return "定期清理可保持充足空间"
+    }
+    
+    private var statusBadge: some View {
+        HStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .fill(Color.white.opacity(0.4))
+                    .frame(width: 10, height: 10)
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 6, height: 6)
+            }
+            Text("进行中")
+        }
+        .font(.system(size: 11, weight: .bold))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.indigo.opacity(0.75))
+        .clipShape(Capsule())
+    }
+    
+    private func pendingBadge(count: Int) -> some View {
+        Text(count > 0 ? "待删 \(count) 张" : "待删区为空")
+            .font(.system(size: 10, weight: .semibold))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.black.opacity(0.35))
+            .foregroundColor(.white.opacity(0.85))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+            )
+    }
+    
+    private func resumeSubtitle(count: Int) -> String {
+        count > 0 ? "待删区中有 \(count) 张照片，记得尽快确认删除" : "等待你的下一次整理"
+    }
+    
+    private func formattedResumeDate(_ date: Date) -> String? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy年 M月d日"
+        return formatter.string(from: date)
     }
     
     private var greetingText: String {

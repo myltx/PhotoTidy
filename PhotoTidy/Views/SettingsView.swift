@@ -5,6 +5,8 @@ struct SettingsView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
     @State private var ignoreFavorites = true
     @State private var confirmDeletion = true
+    @State private var showingClearPendingAlert = false
+    @State private var showingResetProgressAlert = false
 
     var body: some View {
         NavigationStack {
@@ -16,6 +18,7 @@ struct SettingsView: View {
                         Section {
                             VStack(alignment: .leading, spacing: 24) {
                                 proCard
+                                dataManagementSection
                                 cleanupSection
                                 generalSection
                                 footerSection
@@ -34,6 +37,22 @@ struct SettingsView: View {
                 .ignoresSafeArea(edges: .top)
             }
             .navigationBarHidden(true)
+        }
+        .alert("确认清空待删区缓存？", isPresented: $showingClearPendingAlert) {
+            Button("取消", role: .cancel) {}
+            Button("清空", role: .destructive) {
+                viewModel.clearPendingDeletionCache()
+            }
+        } message: {
+            Text("这只会移除 App 内暂存的待删除列表，不会影响系统相册。")
+        }
+        .alert("重置所有清理进度？", isPresented: $showingResetProgressAlert) {
+            Button("取消", role: .cancel) {}
+            Button("重置", role: .destructive) {
+                viewModel.resetCleanupProgress()
+            }
+        } message: {
+            Text("会清除所有月份的处理进度与选择记录，下次将从头开始。")
         }
     }
 }
@@ -268,6 +287,87 @@ private extension SettingsView {
         .frame(maxWidth: .infinity)
         .padding(.top, 12)
     }
+    
+    var dataManagementSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("数据管理")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 4)
+            
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    dataIcon(background: Color.indigo.opacity(0.12))
+                        .overlay(
+                            Image(systemName: "trash.slash")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(Color.indigo)
+                        )
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("清空待删区缓存")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.primary)
+                        Text(pendingCacheDescription)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.secondary)
+                            .textCase(.uppercase)
+                    }
+                    Spacer()
+                    Button("清空") {
+                        showingClearPendingAlert = true
+                    }
+                    .font(.system(size: 11, weight: .bold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .foregroundColor(canClearPendingCache ? .gray.opacity(0.6) : Color.red)
+                    .background(Color(UIColor.systemGray6))
+                    .clipShape(Capsule())
+                    .disabled(canClearPendingCache)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 18)
+                
+                Divider().padding(.leading, 56)
+                
+                Button {
+                    showingResetProgressAlert = true
+                } label: {
+                    HStack(spacing: 12) {
+                        dataIcon(background: Color.orange.opacity(0.12))
+                            .overlay(
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(Color.orange)
+                            )
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("重置清理进度")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.primary)
+                            Text("下次将从头开始扫描")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.secondary)
+                                .textCase(.uppercase)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.secondary.opacity(0.4))
+                    }
+                    .contentShape(Rectangle())
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 18)
+                }
+                .buttonStyle(.plain)
+            }
+            .background(sectionBackground)
+            .cornerRadius(24)
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.black.opacity(0.04), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.04), radius: 8, y: 3)
+        }
+    }
 
     func iconBadge(systemName: String, color: Color) -> some View {
         RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -310,6 +410,24 @@ private extension SettingsView {
 
     var elevatedButtonBackground: Color {
         Color(UIColor.systemBackground)
+    }
+    
+    private var pendingCacheDescription: String {
+        let count = viewModel.pendingDeletionItems.count
+        if count == 0 {
+            return "待删区当前为空"
+        }
+        return "已暂存 \(count) 张照片"
+    }
+    
+    private var canClearPendingCache: Bool {
+        viewModel.pendingDeletionItems.isEmpty
+    }
+    
+    private func dataIcon(background: Color) -> some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(background)
+            .frame(width: 40, height: 40)
     }
 }
 

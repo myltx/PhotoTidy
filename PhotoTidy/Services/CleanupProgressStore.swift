@@ -83,6 +83,13 @@ final class CleanupProgressStore {
             progress.skippedPhotoIds.remove(photoId)
         }
     }
+    
+    func resetAll() {
+        lock.lock()
+        cache.removeAll()
+        defaults.removeObject(forKey: storageKey)
+        lock.unlock()
+    }
 
     private func modifyProgress(year: Int, month: Int, _ updater: (inout CleanupProgress) -> Void) {
         lock.lock()

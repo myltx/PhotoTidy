@@ -52,6 +52,36 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     var currentItem: PhotoItem? { sessionItems[safe: currentIndex] }
     var nextItem: PhotoItem? { sessionItems[safe: currentIndex + 1] }
     var thirdItem: PhotoItem? { sessionItems[safe: currentIndex + 2] }
+    
+    struct CleanupResumeInfo {
+        let lastStopDate: Date
+        let pendingDeletionCount: Int
+    }
+    
+    var cleanupResumeInfo: CleanupResumeInfo? {
+        let progresses = progressStore.allProgresses()
+        guard !progresses.isEmpty else { return nil }
+        let sorted = progresses.sorted {
+            if $0.year == $1.year {
+                return $0.month > $1.month
+            }
+            return $0.year > $1.year
+        }
+        for progress in sorted {
+            guard progress.processedCount > 0 else { continue }
+            let monthItems = monthItems(year: progress.year, month: progress.month)
+            guard !monthItems.isEmpty else { continue }
+            let index = min(progress.processedCount, monthItems.count) - 1
+            guard index >= 0 else { continue }
+            if let date = monthItems[index].creationDate {
+                return CleanupResumeInfo(
+                    lastStopDate: date,
+                    pendingDeletionCount: pendingDeletionItems.count
+                )
+            }
+        }
+        return nil
+    }
 
     // Dashboard Stats
     var similarItemsCount: Int { items.filter { $0.similarGroupId != nil }.count }
@@ -606,6 +636,28 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         }
     }
     
+    func clearPendingDeletionCache() {
+        var updated = false
+        for index in items.indices {
+            if items[index].markedForDeletion {
+                items[index].markedForDeletion = false
+                persistSelectionState(for: items[index])
+                updated = true
+            }
+        }
+        if updated {
+            refreshSession()
+        }
+    }
+    
+    func resetCleanupProgress() {
+        progressStore.resetAll()
+        activeMonthContext = nil
+        currentIndex = 0
+        rebuildMonthStatuses(with: items)
+        refreshSession()
+    }
+    
     func photoItem(for asset: PHAsset, estimatedSize: Int) -> PhotoItem {
         if let existing = items.first(where: { $0.id == asset.localIdentifier }) {
             return existing
@@ -756,13 +808,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     }
 
     private func rebuildMonthSession(year: Int, month: Int) {
-        let calendar = Calendar.current
-        let notDeleted = items.filter { !$0.markedForDeletion }
-        sessionItems = notDeleted.filter { item in
-            guard let date = item.creationDate else { return false }
-            let comps = calendar.dateComponents([.year, .month], from: date)
-            return comps.year == year && comps.month == month
-        }
+        sessionItems = monthItems(year: year, month: month)
         currentFilter = .all
         let storedProgress = progressStore.progress(year: year, month: month)?.processedCount ?? 0
         currentIndex = min(storedProgress, sessionItems.count)
@@ -879,6 +925,16 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             return nil
         }
         return (year, month)
+    }
+    
+    private func monthItems(year: Int, month: Int) -> [PhotoItem] {
+        let calendar = Calendar.current
+        let filtered = items.filter { item in
+            guard !item.markedForDeletion, let date = item.creationDate else { return false }
+            let comps = calendar.dateComponents([.year, .month], from: date)
+            return comps.year == year && comps.month == month
+        }
+        return filtered.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
     }
 
     private func shouldFlagForCleanup(_ item: PhotoItem) -> Bool {
