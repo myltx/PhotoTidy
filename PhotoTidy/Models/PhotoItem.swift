@@ -3,7 +3,7 @@ import Foundation
 import Photos
 
 /// 相似分组类型：用于区分“重复”与“轻微差异”
-enum SimilarityGroupKind {
+enum SimilarityGroupKind: String, Codable {
     case duplicate      // 几乎完全相同的重复照片
     case similar        // 构图/内容相似，存在轻微差异
 }

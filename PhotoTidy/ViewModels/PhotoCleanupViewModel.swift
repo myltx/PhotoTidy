@@ -3,7 +3,7 @@ import Combine
 import Photos
 import Vision
 
-final class PhotoCleanupViewModel: ObservableObject {
+final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
     // MARK: - Properties
     
     // Status
@@ -42,6 +42,8 @@ final class PhotoCleanupViewModel: ObservableObject {
     // Services
     let imageManager = PHCachingImageManager()
     private let progressStore: CleanupProgressStore
+    private let analysisCache: PhotoAnalysisCacheStore
+    private var assetsFetchResult: PHFetchResult<PHAsset>?
     private var cancellable: AnyCancellable?
 
     // MARK: - Computed Properties
@@ -63,8 +65,14 @@ final class PhotoCleanupViewModel: ObservableObject {
 
     // MARK: - Initialization
     
-    init(progressStore: CleanupProgressStore = .shared) {
+    init(
+        progressStore: CleanupProgressStore = .shared,
+        analysisCache: PhotoAnalysisCacheStore = PhotoAnalysisCacheStore()
+    ) {
+        self.analysisCache = analysisCache
         self.progressStore = progressStore
+        super.init()
+        PHPhotoLibrary.shared().register(self)
         refreshDeviceStorageUsage()
         if authorizationStatus == .authorized || authorizationStatus == .limited {
             loadAssets()
@@ -78,6 +86,10 @@ final class PhotoCleanupViewModel: ObservableObject {
             }
     }
     
+    deinit {
+        PHPhotoLibrary.shared().unregisterChangeObserver(self)
+    }
+    
     // MARK: - Status Updates
     
     private func updateAuthorizationStatus() {
@@ -89,6 +101,16 @@ final class PhotoCleanupViewModel: ObservableObject {
             if newStatus != oldStatus && (newStatus == .authorized || newStatus == .limited) {
                 self.loadAssets()
             }
+        }
+    }
+    
+    // MARK: - PHPhotoLibraryChangeObserver
+    
+    func photoLibraryDidChange(_ changeInstance: PHChange) {
+        guard let fetchResult = assetsFetchResult,
+              changeInstance.changeDetails(for: fetchResult) != nil else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.loadAssets()
         }
     }
     
@@ -169,9 +191,14 @@ final class PhotoCleanupViewModel: ObservableObject {
             fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
             
             let allResult = PHAsset.fetchAssets(with: fetchOptions)
+            DispatchQueue.main.async {
+                self.assetsFetchResult = allResult
+            }
+            var currentIdentifiers: Set<String> = []
             allResult.enumerateObjects { asset, _, _ in
                 let resources = PHAssetResource.assetResources(for: asset)
                 let fileSize = (resources.first?.value(forKey: "fileSize") as? Int) ?? 0
+                currentIdentifiers.insert(asset.localIdentifier)
                 let item = PhotoItem(
                     id: asset.localIdentifier,
                     asset: asset,
@@ -194,10 +221,12 @@ final class PhotoCleanupViewModel: ObservableObject {
                 )
                 loadedItems.append(item)
             }
+            self.analysisCache.pruneMissingEntries(keeping: currentIdentifiers)
             
             DispatchQueue.main.async {
                 var restoredItems = loadedItems
                 self.restoreSelectionStates(in: &restoredItems)
+                self.applyCachedAnalysis(to: &restoredItems)
                 self.items = restoredItems
                 self.isLoading = false
                 self.updateSessionItems(for: .all)
@@ -212,6 +241,7 @@ final class PhotoCleanupViewModel: ObservableObject {
         analysisProgress = 0
 
         let snapshotItems = self.items
+        let cacheSnapshot = analysisCache.snapshot()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
             var analyzedItems = snapshotItems
@@ -220,87 +250,115 @@ final class PhotoCleanupViewModel: ObservableObject {
             var featurePrints: [VNFeaturePrintObservation?] = Array(repeating: nil, count: total)
             var pHashes: [UInt64?] = Array(repeating: nil, count: total)
 
-            // 重置相似分组相关字段
             if !analyzedItems.isEmpty {
                 for i in 0..<analyzedItems.count {
                     analyzedItems[i].similarGroupId = nil
                     analyzedItems[i].similarityKind = nil
-                    analyzedItems[i].pHash = nil
                 }
             }
 
-            let requestOptions = PHImageRequestOptions()
-            requestOptions.isSynchronous = true
-            requestOptions.deliveryMode = .highQualityFormat
-            requestOptions.resizeMode = .exact
-            requestOptions.isNetworkAccessAllowed = true
-            let targetSize = CGSize(width: 256, height: 256)
-
+            var indicesNeedingAnalysis: [Int] = []
             for (index, item) in analyzedItems.enumerated() {
-                autoreleasepool {
-                    var thumbnail: UIImage?
-                    let semaphore = DispatchSemaphore(value: 0)
-                    self.imageManager.requestImage(
-                        for: item.asset,
-                        targetSize: targetSize,
-                        contentMode: .aspectFill,
-                        options: requestOptions
-                    ) { image, _ in
-                        thumbnail = image
-                        semaphore.signal()
-                    }
-                    semaphore.wait()
+                if let entry = cacheSnapshot[item.id],
+                   entry.version == PhotoAnalysisCacheEntry.currentVersion,
+                   entry.fileSize == item.fileSize {
+                    featurePrints[index] = self.unarchiveFeaturePrint(from: entry.featurePrintData)
+                    pHashes[index] = entry.pHash
+                    analyzedItems[index].isScreenshot = entry.isScreenshot
+                    analyzedItems[index].isDocumentLike = entry.isDocumentLike
+                    analyzedItems[index].isTextImage = entry.isTextImage
+                    analyzedItems[index].blurScore = entry.blurScore
+                    analyzedItems[index].isBlurredOrShaky = entry.isBlurredOrShaky
+                    analyzedItems[index].exposureIsBad = entry.exposureIsBad
+                    analyzedItems[index].pHash = entry.pHash
+                } else {
+                    indicesNeedingAnalysis.append(index)
+                }
+                analyzedItems[index].isLargeFile = item.fileSize > 15 * 1024 * 1024
+            }
 
-                    if let image = thumbnail {
-                        let blurScore = analysisService.computeBlurScore(for: image) ?? 0
-                        let exposureBad = analysisService.isExposureBad(for: image)
-                        let isBlurred = blurScore < 0.04 || (blurScore < 0.07 && exposureBad)
+            var processedCount = total - indicesNeedingAnalysis.count
+            if total > 0 {
+                DispatchQueue.main.async {
+                    self.analysisProgress = Double(processedCount) / Double(total)
+                }
+            }
 
-                        analyzedItems[index].blurScore = blurScore
-                        analyzedItems[index].exposureIsBad = exposureBad
-                        analyzedItems[index].isBlurredOrShaky = isBlurred
+            if !indicesNeedingAnalysis.isEmpty {
+                let requestOptions = PHImageRequestOptions()
+                requestOptions.isSynchronous = true
+                requestOptions.deliveryMode = .highQualityFormat
+                requestOptions.resizeMode = .exact
+                requestOptions.isNetworkAccessAllowed = true
+                let targetSize = CGSize(width: 256, height: 256)
 
-                        analyzedItems[index].isLargeFile = item.fileSize > 15 * 1024 * 1024
-
-                        if !item.isVideo {
-                            featurePrints[index] = analysisService.featurePrint(for: image)
-                            let hash = analysisService.perceptualHash(for: image)
-                            pHashes[index] = hash
-                            analyzedItems[index].pHash = hash
-
-                            // 使用 AssetTypeDetector 进行截图 / 文档 / 文字图片 分类
-                            if #available(iOS 16.0, *), let cgImage = image.cgImage {
-                                let type = AssetTypeDetector.shared.detectAssetTypeSync(asset: item.asset, image: cgImage)
-                                analyzedItems[index].assetType = type
-                                switch type {
-                                case .screenshot:
-                                    analyzedItems[index].isScreenshot = true
-                                    analyzedItems[index].isDocumentLike = false
-                                    analyzedItems[index].isTextImage = false
-                                case .document:
-                                    analyzedItems[index].isDocumentLike = true
-                                    analyzedItems[index].isTextImage = false
-                                case .textImage:
-                                    analyzedItems[index].isTextImage = true
-                                case .normalPhoto:
-                                    break
-                                }
-                            } else if !item.isScreenshot {
-                                // 老设备或无法使用 Vision：退化为原有的文档检测逻辑
-                                let isDoc = analysisService.isDocumentLike(image: image)
-                                analyzedItems[index].isDocumentLike = isDoc
-                            }
+                for (offset, index) in indicesNeedingAnalysis.enumerated() {
+                    autoreleasepool {
+                        var thumbnail: UIImage?
+                        let semaphore = DispatchSemaphore(value: 0)
+                        let asset = analyzedItems[index].asset
+                        self.imageManager.requestImage(
+                            for: asset,
+                            targetSize: targetSize,
+                            contentMode: .aspectFill,
+                            options: requestOptions
+                        ) { image, _ in
+                            thumbnail = image
+                            semaphore.signal()
                         }
-                    } else {
-                        // 缩略图获取失败，至少把大文件标记逻辑跑一下
-                        analyzedItems[index].isLargeFile = item.fileSize > 15 * 1024 * 1024
-                    }
+                        semaphore.wait()
 
-                    let progress = Double(index + 1) / Double(total)
-                    // Throttle UI updates to avoid flooding the main thread
-                    if index % 15 == 0 || index == total - 1 {
-                        DispatchQueue.main.async {
-                            self.analysisProgress = progress
+                        if let image = thumbnail {
+                            let blurScore = analysisService.computeBlurScore(for: image) ?? 0
+                            let exposureBad = analysisService.isExposureBad(for: image)
+                            let isBlurred = blurScore < 0.04 || (blurScore < 0.07 && exposureBad)
+
+                            analyzedItems[index].blurScore = blurScore
+                            analyzedItems[index].exposureIsBad = exposureBad
+                            analyzedItems[index].isBlurredOrShaky = isBlurred
+
+                            let fileSize = analyzedItems[index].fileSize
+                            analyzedItems[index].isLargeFile = fileSize > 15 * 1024 * 1024
+
+                            if !analyzedItems[index].isVideo {
+                                let feature = analysisService.featurePrint(for: image)
+                                featurePrints[index] = feature
+                                let hash = analysisService.perceptualHash(for: image)
+                                pHashes[index] = hash
+                                analyzedItems[index].pHash = hash
+
+                                if #available(iOS 16.0, *), let cgImage = image.cgImage {
+                                    let type = AssetTypeDetector.shared.detectAssetTypeSync(asset: asset, image: cgImage)
+                                    analyzedItems[index].assetType = type
+                                    switch type {
+                                    case .screenshot:
+                                        analyzedItems[index].isScreenshot = true
+                                        analyzedItems[index].isDocumentLike = false
+                                        analyzedItems[index].isTextImage = false
+                                    case .document:
+                                        analyzedItems[index].isDocumentLike = true
+                                        analyzedItems[index].isTextImage = false
+                                    case .textImage:
+                                        analyzedItems[index].isTextImage = true
+                                    case .normalPhoto:
+                                        break
+                                    }
+                                } else if !analyzedItems[index].isScreenshot {
+                                    let isDoc = analysisService.isDocumentLike(image: image)
+                                    analyzedItems[index].isDocumentLike = isDoc
+                                }
+                            }
+                        } else {
+                            let fileSize = analyzedItems[index].fileSize
+                            analyzedItems[index].isLargeFile = fileSize > 15 * 1024 * 1024
+                        }
+
+                        processedCount += 1
+                        if offset % 15 == 0 || offset == indicesNeedingAnalysis.count - 1 {
+                            let progress = Double(processedCount) / Double(total)
+                            DispatchQueue.main.async {
+                                self.analysisProgress = progress
+                            }
                         }
                     }
                 }
@@ -462,6 +520,9 @@ final class PhotoCleanupViewModel: ObservableObject {
                 }
             }
 
+            let cacheEntries = self.buildCacheEntries(from: analyzedItems, featurePrints: featurePrints, pHashes: pHashes)
+            self.analysisCache.update(entries: cacheEntries)
+
             DispatchQueue.main.async {
                 let latestItems = self.items
                 var deletionMap: [String: Bool] = [:]
@@ -613,6 +674,7 @@ final class PhotoCleanupViewModel: ObservableObject {
                 if success {
                     self.clearStoredRecords(for: toDeleteItems)
                     let toDeleteIds = Set(toDeleteAssets.map { $0.localIdentifier })
+                    self.analysisCache.removeEntries(for: Array(toDeleteIds))
                     self.items.removeAll { toDeleteIds.contains($0.id) }
                     self.revalidateSimilarGroups()
                     self.refreshSession()
@@ -716,6 +778,68 @@ final class PhotoCleanupViewModel: ObservableObject {
                 items[index].markedForDeletion = true
             }
         }
+    }
+    
+    private func applyCachedAnalysis(to items: inout [PhotoItem]) {
+        let cacheEntries = analysisCache.snapshot()
+        for index in items.indices {
+            guard let entry = cacheEntries[items[index].id],
+                  entry.version == PhotoAnalysisCacheEntry.currentVersion,
+                  entry.fileSize == items[index].fileSize else {
+                continue
+            }
+            items[index].isScreenshot = entry.isScreenshot
+            items[index].isDocumentLike = entry.isDocumentLike
+            items[index].isTextImage = entry.isTextImage
+            items[index].blurScore = entry.blurScore
+            items[index].isBlurredOrShaky = entry.isBlurredOrShaky
+            items[index].exposureIsBad = entry.exposureIsBad
+            items[index].pHash = entry.pHash
+            items[index].similarGroupId = entry.similarityGroupId
+            if let kindRaw = entry.similarityKind {
+                items[index].similarityKind = SimilarityGroupKind(rawValue: kindRaw)
+            } else {
+                items[index].similarityKind = nil
+            }
+            items[index].isLargeFile = items[index].fileSize > 15 * 1024 * 1024
+        }
+    }
+    
+    private func buildCacheEntries(
+        from analyzedItems: [PhotoItem],
+        featurePrints: [VNFeaturePrintObservation?],
+        pHashes: [UInt64?]
+    ) -> [PhotoAnalysisCacheEntry] {
+        guard analyzedItems.count == featurePrints.count,
+              analyzedItems.count == pHashes.count else {
+            return []
+        }
+        return analyzedItems.enumerated().map { index, item in
+            PhotoAnalysisCacheEntry(
+                localIdentifier: item.id,
+                fileSize: item.fileSize,
+                isScreenshot: item.isScreenshot,
+                isDocumentLike: item.isDocumentLike,
+                isTextImage: item.isTextImage,
+                blurScore: item.blurScore,
+                isBlurredOrShaky: item.isBlurredOrShaky,
+                exposureIsBad: item.exposureIsBad,
+                pHash: pHashes[index],
+                featurePrintData: archiveFeaturePrint(featurePrints[index]),
+                similarityGroupId: item.similarGroupId,
+                similarityKind: item.similarityKind?.rawValue
+            )
+        }
+    }
+    
+    private func archiveFeaturePrint(_ observation: VNFeaturePrintObservation?) -> Data? {
+        guard let observation else { return nil }
+        return try? NSKeyedArchiver.archivedData(withRootObject: observation, requiringSecureCoding: true)
+    }
+    
+    private func unarchiveFeaturePrint(from data: Data?) -> VNFeaturePrintObservation? {
+        guard let data else { return nil }
+        return try? NSKeyedUnarchiver.unarchivedObject(ofClass: VNFeaturePrintObservation.self, from: data)
     }
 
     private func persistSelectionState(for item: PhotoItem) {
