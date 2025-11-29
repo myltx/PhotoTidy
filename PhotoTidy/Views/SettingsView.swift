@@ -3,28 +3,23 @@ import Photos
 
 struct SettingsView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
-    @State private var ignoreFavorites = true
-    @State private var confirmDeletion = true
-    @State private var showingClearPendingAlert = false
-    @State private var showingResetProgressAlert = false
-
+    
     var body: some View {
         NavigationStack {
             ZStack {
                 blurredBackground
-
+                
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: 24, pinnedViews: [.sectionHeaders]) {
                         Section {
-                            VStack(alignment: .leading, spacing: 24) {
+                            VStack(alignment: .leading, spacing: 20) {
                                 proCard
                                 dataManagementSection
-                                cleanupSection
-                                generalSection
-                                footerSection
+                                moduleNavigator
+                                supportSection
                             }
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 60)
+                            .padding(.horizontal, 18)
+                            .padding(.bottom, 48)
                         } header: {
                             header
                                 .padding(.horizontal, 20)
@@ -38,6 +33,476 @@ struct SettingsView: View {
             }
             .navigationBarHidden(true)
         }
+    }
+}
+
+private extension SettingsView {
+    var blurredBackground: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color.clear)
+                .overlay(
+                    Image("all_album_bg")
+                        .resizable()
+                        .scaledToFill()
+                )
+                .clipped()
+                .opacity(0.25)
+                .blur(radius: 18)
+                .ignoresSafeArea()
+            
+            LinearGradient(
+                colors: [
+                    Color(UIColor.systemGray6).opacity(0.95),
+                    Color(UIColor.systemBackground).opacity(0.85)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        }
+    }
+    
+    var header: some View {
+        HStack {
+            Spacer()
+            Text("设置")
+                .font(.system(size: 28, weight: .bold))
+                .foregroundColor(.clear)
+            Spacer()
+        }
+    }
+    
+    var proCard: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color("brand-start"), Color("brand-end")],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .shadow(color: Color("brand-start").opacity(0.2), radius: 12, y: 6)
+            
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    HStack(spacing: 8) {
+                        Image(systemName: "crown.fill")
+                            .foregroundColor(.yellow)
+                        Text("PhotoTidy Pro")
+                            .font(.system(size: 20, weight: .bold))
+                    }
+                    Spacer()
+                    Text("当前：免费版")
+                        .font(.system(size: 10, weight: .medium))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 3)
+                        .background(Color.white.opacity(0.2))
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule().stroke(Color.white.opacity(0.3), lineWidth: 1)
+                        )
+                }
+                
+                Text("解锁无限清理额度、高级 AI 识别与专属主题。")
+                    .font(.system(size: 12))
+                    .foregroundColor(Color.white.opacity(0.9))
+                
+                Button(action: {}) {
+                    HStack(spacing: 8) {
+                        Text("立即升级")
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 13, weight: .bold))
+                    }
+                    .font(.system(size: 14, weight: .bold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background(SettingsStyle.elevatedButtonBackground)
+                    .foregroundColor(Color("brand-start"))
+                    .cornerRadius(16)
+                    .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
+                }
+            }
+            .padding(20)
+        }
+    }
+    
+    var moduleNavigator: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("功能区")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 4)
+            
+            VStack(spacing: 10) {
+                moduleLink(
+                    title: "偏好设置",
+                    description: "忽略收藏、删除确认、主题样式",
+                    systemImage: "slider.horizontal.3",
+                    tint: .blue
+                ) {
+                    PreferencesView(viewModel: viewModel)
+                }
+                
+                moduleLink(
+                    title: "高级操作",
+                    description: "清空待删区、重置进度等",
+                    systemImage: "wand.and.stars",
+                    tint: .orange
+                ) {
+                    AdvancedOperationsView(viewModel: viewModel)
+                }
+                
+                moduleLink(
+                    title: "系统权限",
+                    description: "照片权限及系统授权管理",
+                    systemImage: "lock.shield",
+                    tint: .green
+                ) {
+                    PermissionsView(viewModel: viewModel)
+                }
+            }
+            .background(SettingsStyle.sectionBackground)
+            .cornerRadius(22)
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.black.opacity(0.05), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.03), radius: 6, y: 3)
+        }
+    }
+    
+    var dataManagementSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("数据管理")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 4)
+            
+            VStack(spacing: 0) {
+                NavigationLink {
+                    SkippedPhotosView(viewModel: viewModel)
+                } label: {
+                    HStack {
+                        HStack(spacing: 10) {
+                            dataIcon(background: Color.purple.opacity(0.12))
+                                .overlay(
+                                    Image(systemName: "arrow.counterclockwise")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundColor(Color.purple)
+                                )
+                            Text("待确认照片")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.primary)
+                        }
+                        Spacer()
+                        HStack(spacing: 8) {
+                            Text("\(viewModel.skippedPhotoRecords.count) 张")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(Color.purple)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.purple.opacity(0.12))
+                                .clipShape(Capsule())
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.secondary.opacity(0.4))
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 16)
+                }
+                .buttonStyle(.plain)
+            }
+            .background(SettingsStyle.sectionBackground)
+            .cornerRadius(22)
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.black.opacity(0.05), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.03), radius: 6, y: 3)
+        }
+    }
+    
+    var supportSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("支持与信息")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 4)
+            
+            VStack(spacing: 0) {
+                supportTile(
+                    title: "帮助与反馈",
+                    icon: "questionmark.circle",
+                    tint: .gray
+                ) {}
+                Divider().padding(.leading, 56)
+                supportTile(
+                    title: "联系支持",
+                    icon: "bubble.left.and.bubble.right",
+                    tint: Color("brand-start")
+                ) {}
+                Divider().padding(.leading, 56)
+                HStack {
+                    iconBadge(systemName: "info.circle", color: .secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("App 版本")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.primary)
+                        Text(versionText)
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 16)
+            }
+            .background(SettingsStyle.sectionBackground)
+            .cornerRadius(22)
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.black.opacity(0.05), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.03), radius: 6, y: 3)
+        }
+    }
+    
+    private func moduleLink<Destination: View>(
+        title: String,
+        description: String,
+        systemImage: String,
+        tint: Color,
+        destination: @escaping () -> Destination
+    ) -> some View {
+        NavigationLink {
+            destination()
+        } label: {
+            HStack(spacing: 10) {
+                iconBadge(systemName: systemImage, color: tint)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.primary)
+                    Text(description)
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.secondary.opacity(0.35))
+            }
+            .contentShape(Rectangle())
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+        }
+        .buttonStyle(.plain)
+    }
+    
+    private func supportTile(title: String, icon: String, tint: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                iconBadge(systemName: icon, color: tint)
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.primary)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.secondary.opacity(0.35))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+        }
+        .buttonStyle(.plain)
+    }
+    
+    func iconBadge(systemName: String, color: Color) -> some View {
+        RoundedRectangle(cornerRadius: 11, style: .continuous)
+            .fill(color.opacity(0.12))
+            .frame(width: 36, height: 36)
+            .overlay(
+                Image(systemName: systemName)
+                    .foregroundColor(color)
+                    .font(.system(size: 16, weight: .semibold))
+            )
+    }
+    
+    func dataIcon(background: Color) -> some View {
+        RoundedRectangle(cornerRadius: 11, style: .continuous)
+            .fill(background)
+            .frame(width: 36, height: 36)
+    }
+    
+    var versionText: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        return "Version \(version) (Build \(build))"
+    }
+}
+
+private enum SettingsStyle {
+    static let sectionBackground = Color(UIColor.secondarySystemBackground)
+    static let elevatedButtonBackground = Color(UIColor.systemBackground)
+}
+
+private struct SettingsToggleTile: View {
+    let icon: String
+    let iconColor: Color
+    let title: String
+    @Binding var isOn: Bool
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(iconColor.opacity(0.12))
+                .frame(width: 36, height: 36)
+                .overlay(
+                    Image(systemName: icon)
+                        .foregroundColor(iconColor)
+                        .font(.system(size: 14, weight: .semibold))
+                )
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.primary)
+            Spacer()
+            Toggle("", isOn: $isOn)
+                .labelsHidden()
+                .toggleStyle(SettingsToggleStyle())
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+}
+
+private struct SettingsToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        ZStack(alignment: configuration.isOn ? .trailing : .leading) {
+            Capsule()
+                .fill(configuration.isOn ? Color("brand-start") : Color(UIColor.systemGray4))
+                .frame(width: 48, height: 26)
+            Circle()
+                .fill(Color(UIColor.systemBackground))
+                .frame(width: 24, height: 24)
+                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                .padding(1)
+        }
+        .animation(.spring(response: 0.2, dampingFraction: 0.7), value: configuration.isOn)
+        .onTapGesture {
+            configuration.isOn.toggle()
+        }
+    }
+}
+
+struct PreferencesView: View {
+    @ObservedObject var viewModel: PhotoCleanupViewModel
+    @State private var ignoreFavorites = true
+    @State private var confirmDeletion = true
+    
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                preferenceToggles
+                themeSelector
+            }
+            .padding(20)
+        }
+        .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
+        .navigationTitle("偏好设置")
+    }
+    
+    private var preferenceToggles: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsToggleTile(
+                icon: "heart",
+                iconColor: .pink,
+                title: "忽略收藏照片",
+                isOn: $ignoreFavorites
+            )
+            Divider().padding(.leading, 56)
+            SettingsToggleTile(
+                icon: "bell",
+                iconColor: .blue,
+                title: "删除确认弹窗",
+                isOn: $confirmDeletion
+            )
+        }
+        .background(SettingsStyle.sectionBackground)
+        .cornerRadius(22)
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.black.opacity(0.05), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.03), radius: 6, y: 3)
+    }
+    
+    private var themeSelector: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(Color.purple.opacity(0.12))
+                    .frame(width: 36, height: 36)
+                    .overlay(
+                        Image(systemName: "moon.fill")
+                            .foregroundColor(.purple)
+                            .font(.system(size: 15, weight: .semibold))
+                    )
+                Text("外观主题")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            
+            HStack(spacing: 8) {
+                themeButton(theme: .system, label: "跟随系统")
+                themeButton(theme: .light, label: "浅色")
+                themeButton(theme: .dark, label: "深色")
+            }
+            .padding(6)
+            .background(Color(UIColor.systemGray5))
+            .cornerRadius(18)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 18)
+        .background(SettingsStyle.sectionBackground)
+        .cornerRadius(22)
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.black.opacity(0.05), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.03), radius: 6, y: 3)
+    }
+    
+    private func themeButton(theme: AppTheme, label: String) -> some View {
+        Button(action: { viewModel.selectedTheme = theme }) {
+            Text(label)
+                .font(.system(size: 12, weight: viewModel.selectedTheme == theme ? .bold : .regular))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(viewModel.selectedTheme == theme ? SettingsStyle.elevatedButtonBackground : Color.clear)
+                .foregroundColor(viewModel.selectedTheme == theme ? .primary : .secondary)
+                .cornerRadius(14)
+                .shadow(color: viewModel.selectedTheme == theme ? Color.black.opacity(0.1) : .clear, radius: 4, y: 2)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct AdvancedOperationsView: View {
+    @ObservedObject var viewModel: PhotoCleanupViewModel
+    @State private var showingClearPendingAlert = false
+    @State private var showingResetProgressAlert = false
+    
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                clearCacheTile
+                resetProgressTile
+            }
+            .padding(20)
+        }
+        .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
+        .navigationTitle("高级操作")
         .alert("确认清空待删区缓存？", isPresented: $showingClearPendingAlert) {
             Button("取消", role: .cancel) {}
             Button("清空", role: .destructive) {
@@ -55,398 +520,77 @@ struct SettingsView: View {
             Text("将同时清除首页全相册整理与时光机（月度）的进度记录，恢复初始状态。")
         }
     }
-}
-
-private extension SettingsView {
-    var blurredBackground: some View {
-        ZStack {
-            // By using an overlay on a Rectangle, we prevent the image's oversized frame
-            // from influencing the ZStack's layout, which was causing the width issue.
-            Rectangle()
-                .fill(Color.clear)
+    
+    private var clearCacheTile: some View {
+        HStack(spacing: 10) {
+            dataIcon(background: Color.indigo.opacity(0.12))
                 .overlay(
-                    Image("all_album_bg")
-                        .resizable()
-                        .scaledToFill()
+                    Image(systemName: "trash.slash")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(Color.indigo)
                 )
-                .clipped()
-                .opacity(0.25)
-                .blur(radius: 18)
-                .ignoresSafeArea()
-
-            LinearGradient(
-                colors: [
-                    Color(UIColor.systemGray6).opacity(0.95),
-                    Color(UIColor.systemBackground).opacity(0.85)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-        }
-    }
-
-    var header: some View {
-        HStack {
-            Spacer()
-            Text("设置")
-                .font(.system(size: 28, weight: .bold))
-                .foregroundColor(.clear)
-            Spacer()
-        }
-    }
-
-    var proCard: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color("brand-start"), Color("brand-end")],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-            .shadow(color: Color("brand-start").opacity(0.25), radius: 16, y: 8)
-
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    HStack(spacing: 8) {
-                        Image(systemName: "crown.fill")
-                            .foregroundColor(.yellow)
-                        Text("PhotoTidy Pro")
-                            .font(.system(size: 20, weight: .bold))
-                    }
-                    Spacer()
-                    Text("当前：免费版")
-                        .font(.system(size: 11, weight: .medium))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 4)
-                        .background(Color.white.opacity(0.2))
-                        .clipShape(Capsule())
-                        .overlay(
-                            Capsule().stroke(Color.white.opacity(0.3), lineWidth: 1)
-                        )
-                }
-
-                Text("解锁无限清理额度、高级 AI 识别与专属主题。")
-                    .font(.system(size: 13))
-                    .foregroundColor(Color.white.opacity(0.9))
-
-                Button(action: {}) {
-                    HStack(spacing: 8) {
-                        Text("立即升级")
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 13, weight: .bold))
-                    }
-                    .font(.system(size: 15, weight: .bold))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 48)
-                    .background(elevatedButtonBackground)
-                    .foregroundColor(Color("brand-start"))
-                    .cornerRadius(16)
-                    .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
-                }
-            }
-            .padding(24)
-        }
-    }
-
-    var cleanupSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("清理偏好")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 4)
-
-            VStack(spacing: 0) {
-                SettingsToggleTile(
-                    icon: "heart",
-                    iconColor: .pink,
-                    title: "忽略收藏照片",
-                    isOn: $ignoreFavorites
-                )
-                Divider().padding(.leading, 56)
-                SettingsToggleTile(
-                    icon: "bell",
-                    iconColor: .blue,
-                    title: "删除确认弹窗",
-                    isOn: $confirmDeletion
-                )
-            }
-            .background(sectionBackground)
-            .cornerRadius(24)
-            .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(Color.black.opacity(0.04), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.04), radius: 8, y: 3)
-        }
-    }
-
-    var generalSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("通用")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 4)
-
-            VStack(spacing: 0) {
-                themeTile
-                Divider().padding(.leading, 56)
-                permissionTile
-                Divider().padding(.leading, 56)
-                helpTile
-            }
-            .background(sectionBackground)
-            .cornerRadius(24)
-            .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(Color.black.opacity(0.04), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.04), radius: 8, y: 3)
-        }
-    }
-
-    var themeTile: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                iconBadge(systemName: "moon.fill", color: .purple)
-                Text("外观主题")
-                    .font(.system(size: 14, weight: .semibold))
-            }
-
-            HStack(spacing: 8) {
-                themeButton(theme: .system, label: "跟随系统")
-                themeButton(theme: .light, label: "浅色")
-                themeButton(theme: .dark, label: "深色")
-            }
-            .padding(6)
-            .background(Color(UIColor.systemGray5))
-            .cornerRadius(18)
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 20)
-    }
-
-    var permissionTile: some View {
-        Button {
-            if let url = URL(string: UIApplication.openSettingsURLString) {
-                UIApplication.shared.open(url)
-            }
-        } label: {
-            HStack {
-                iconBadge(systemName: "photo.on.rectangle.angled", color: .green)
-                Text("照片访问权限")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.primary)
-                Spacer()
-                Text(authorizationStatusText)
-                    .font(.system(size: 12))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("清空待删区缓存")
+                    .font(.system(size: 13, weight: .semibold))
+                Text(pendingCacheDescription)
+                    .font(.system(size: 11))
                     .foregroundColor(.secondary)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.secondary.opacity(0.4))
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 18)
-        }
-        .buttonStyle(.plain)
-    }
-
-    var helpTile: some View {
-        Button(action: {}) {
-            HStack {
-                iconBadge(systemName: "questionmark.circle", color: .gray)
-                Text("帮助与反馈")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.primary)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.secondary.opacity(0.4))
+            Spacer()
+            Button("清空") {
+                showingClearPendingAlert = true
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 18)
+            .font(.system(size: 10, weight: .bold))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .foregroundColor(canClearPendingCache ? .gray.opacity(0.6) : .red)
+            .background(Color(UIColor.systemGray6))
+            .clipShape(Capsule())
+            .disabled(canClearPendingCache)
         }
-        .buttonStyle(.plain)
-    }
-
-    var footerSection: some View {
-        VStack(spacing: 6) {
-            Text("Version 1.0.0 (Build 1024)")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-            Button(action: {}) {
-                Text("联系支持")
-                    .font(.system(size: 11, weight: .semibold))
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color("brand-start").opacity(0.12))
-                    .foregroundColor(Color("brand-start"))
-                    .cornerRadius(14)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 12)
+        .padding(16)
+        .background(SettingsStyle.sectionBackground)
+        .cornerRadius(22)
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.black.opacity(0.05), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.03), radius: 6, y: 3)
     }
     
-    var dataManagementSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("数据管理")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 4)
-            
-            VStack(spacing: 0) {
-                NavigationLink {
-                    SkippedPhotosView(viewModel: viewModel)
-                } label: {
-                    HStack {
-                        HStack(spacing: 12) {
-                            dataIcon(background: Color.purple.opacity(0.12))
-                                .overlay(
-                                    Image(systemName: "arrow.counterclockwise")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundColor(Color.purple)
-                                )
-                            Text("待确认照片")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.primary)
-                        }
-                        Spacer()
-                        HStack(spacing: 8) {
-                            Text("\(viewModel.skippedPhotoRecords.count) 张")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(Color.purple)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.purple.opacity(0.12))
-                                .clipShape(Capsule())
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(.secondary.opacity(0.4))
-                        }
-                    }
-                    .contentShape(Rectangle())
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 18)
+    private var resetProgressTile: some View {
+        Button {
+            showingResetProgressAlert = true
+        } label: {
+            HStack(spacing: 10) {
+                dataIcon(background: Color.orange.opacity(0.12))
+                    .overlay(
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(Color.orange)
+                    )
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("重置清理进度")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("全相册与月份记录都会被重置")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
                 }
-                .buttonStyle(.plain)
-                
-                Divider().padding(.leading, 56)
-                
-                HStack(spacing: 12) {
-                    dataIcon(background: Color.indigo.opacity(0.12))
-                        .overlay(
-                            Image(systemName: "trash.slash")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(Color.indigo)
-                        )
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("清空待删区缓存")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.primary)
-                        Text(pendingCacheDescription)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.secondary)
-                            .textCase(.uppercase)
-                    }
-                    Spacer()
-                    Button("清空") {
-                        showingClearPendingAlert = true
-                    }
+                Spacer()
+                Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .bold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .foregroundColor(canClearPendingCache ? .gray.opacity(0.6) : Color.red)
-                    .background(Color(UIColor.systemGray6))
-                    .clipShape(Capsule())
-                    .disabled(canClearPendingCache)
-                }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 18)
-                
-                Divider().padding(.leading, 56)
-                
-                Button {
-                    showingResetProgressAlert = true
-                } label: {
-                    HStack(spacing: 12) {
-                        dataIcon(background: Color.orange.opacity(0.12))
-                            .overlay(
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundColor(Color.orange)
-                            )
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("重置清理进度")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.primary)
-                            Text("全相册与月份记录都会被重置")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.secondary)
-                                .textCase(.uppercase)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.secondary.opacity(0.4))
-                    }
-                    .contentShape(Rectangle())
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 18)
-                }
-                .buttonStyle(.plain)
+                    .foregroundColor(.secondary.opacity(0.4))
             }
-            .background(sectionBackground)
-            .cornerRadius(24)
+            .padding(16)
+            .background(SettingsStyle.sectionBackground)
+            .cornerRadius(22)
             .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(Color.black.opacity(0.04), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.black.opacity(0.05), lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.04), radius: 8, y: 3)
-        }
-    }
-
-    func iconBadge(systemName: String, color: Color) -> some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(color.opacity(0.12))
-            .frame(width: 40, height: 40)
-            .overlay(
-                Image(systemName: systemName)
-                    .foregroundColor(color)
-                    .font(.system(size: 16, weight: .semibold))
-            )
-    }
-
-    func themeButton(theme: AppTheme, label: String) -> some View {
-        Button(action: { viewModel.selectedTheme = theme }) {
-            Text(label)
-                .font(.system(size: 12, weight: viewModel.selectedTheme == theme ? .bold : .regular))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(viewModel.selectedTheme == theme ? elevatedButtonBackground : Color.clear)
-                .foregroundColor(viewModel.selectedTheme == theme ? .primary : .secondary)
-                .cornerRadius(14)
-                .shadow(color: viewModel.selectedTheme == theme ? Color.black.opacity(0.1) : .clear, radius: 4, y: 2)
+            .shadow(color: .black.opacity(0.03), radius: 6, y: 3)
         }
         .buttonStyle(.plain)
-    }
-
-    private var authorizationStatusText: String {
-        switch viewModel.authorizationStatus {
-        case .authorized: return "所有照片"
-        case .limited: return "部分照片"
-        case .denied, .restricted: return "已拒绝"
-        case .notDetermined: return "待授权"
-        @unknown default: return "未知"
-        }
-    }
-
-    var sectionBackground: Color {
-        Color(UIColor.secondarySystemBackground)
-    }
-
-    var elevatedButtonBackground: Color {
-        Color(UIColor.systemBackground)
     }
     
     private var pendingCacheDescription: String {
@@ -468,50 +612,99 @@ private extension SettingsView {
     }
 }
 
-private struct SettingsToggleTile: View {
-    let icon: String
-    let iconColor: Color
-    let title: String
-    @Binding var isOn: Bool
-
+struct PermissionsView: View {
+    @ObservedObject var viewModel: PhotoCleanupViewModel
+    
     var body: some View {
-        HStack(spacing: 14) {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(iconColor.opacity(0.12))
-                .frame(width: 40, height: 40)
-                .overlay(
-                    Image(systemName: icon)
-                        .foregroundColor(iconColor)
-                        .font(.system(size: 14, weight: .semibold))
-                )
-            Text(title)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.primary)
-            Spacer()
-            Toggle("", isOn: $isOn)
-                .labelsHidden()
-                .toggleStyle(SettingsToggleStyle())
+        ScrollView {
+            VStack(spacing: 18) {
+                photoPermissionTile
+                placeholderTile(title: "通知权限", icon: "bell.badge")
+                placeholderTile(title: "相机权限", icon: "camera")
+            }
+            .padding(20)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
+        .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
+        .navigationTitle("系统权限")
     }
-}
-
-private struct SettingsToggleStyle: ToggleStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        ZStack(alignment: configuration.isOn ? .trailing : .leading) {
-            Capsule()
-                .fill(configuration.isOn ? Color("brand-start") : Color(UIColor.systemGray4))
-                .frame(width: 48, height: 26)
-            Circle()
-                .fill(Color(UIColor.systemBackground))
-                .frame(width: 24, height: 24)
-                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
-                .padding(1)
+    
+    private var photoPermissionTile: some View {
+        Button {
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url)
+            }
+        } label: {
+            HStack {
+                iconBadge(systemName: "photo.on.rectangle.angled", color: .green)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("照片访问权限")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.primary)
+                    Text(authorizationStatusText)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.secondary.opacity(0.4))
+            }
+            .padding(16)
+            .background(SettingsStyle.sectionBackground)
+            .cornerRadius(22)
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.black.opacity(0.05), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.03), radius: 6, y: 3)
         }
-        .animation(.spring(response: 0.2, dampingFraction: 0.7), value: configuration.isOn)
-        .onTapGesture {
-            configuration.isOn.toggle()
+        .buttonStyle(.plain)
+    }
+    
+    private func placeholderTile(title: String, icon: String) -> some View {
+        HStack {
+            iconBadge(systemName: icon, color: .gray)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                Text("敬请期待")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(.secondary.opacity(0.2))
         }
+        .padding(16)
+        .background(SettingsStyle.sectionBackground)
+        .cornerRadius(22)
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.black.opacity(0.05), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.03), radius: 6, y: 3)
+        .opacity(0.8)
+    }
+    
+    private var authorizationStatusText: String {
+        switch viewModel.authorizationStatus {
+        case .authorized: return "已授权所有照片"
+        case .limited: return "仅限部分照片"
+        case .denied, .restricted: return "已拒绝"
+        case .notDetermined: return "待授权"
+        @unknown default: return "未知"
+        }
+    }
+    
+    private func iconBadge(systemName: String, color: Color) -> some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(color.opacity(0.12))
+            .frame(width: 40, height: 40)
+            .overlay(
+                Image(systemName: systemName)
+                    .foregroundColor(color)
+                    .font(.system(size: 16, weight: .semibold))
+            )
     }
 }
