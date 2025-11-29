@@ -684,7 +684,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     func resetSmartCleanupProgressOnly() {
         storeSmartCleanupProgress(nil)
     }
-
+    
     func resetTimeMachineProgress() {
         timeMachineProgressStore.resetAll()
         rebuildMonthStatuses(with: items)
@@ -979,6 +979,36 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
 
     func clearSkippedRecords() {
         skippedPhotoStore.clear()
+        refreshSkippedPhotoRecords()
+    }
+    
+    func confirmDeletionForSkipped(ids: [String]) {
+        guard !ids.isEmpty else { return }
+        var updated = false
+        for id in ids {
+            if let index = items.firstIndex(where: { $0.id == id }) {
+                items[index].markedForDeletion = true
+                persistSelectionState(for: items[index])
+                updated = true
+            }
+        }
+        if updated {
+            syncSmartCleanupPendingFlag()
+            refreshSession()
+        }
+        skippedPhotoStore.remove(ids: ids)
+        refreshSkippedPhotoRecords()
+    }
+    
+    func reinstateSkippedPhotos(ids: [String]) {
+        guard !ids.isEmpty else { return }
+        skippedPhotoStore.remove(ids: ids)
+        refreshSkippedPhotoRecords()
+    }
+    
+    func acknowledgeSkippedPhotos(ids: [String]) {
+        guard !ids.isEmpty else { return }
+        skippedPhotoStore.remove(ids: ids)
         refreshSkippedPhotoRecords()
     }
 
