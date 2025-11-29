@@ -29,7 +29,7 @@ struct CleanerContainerView: View {
                     .padding(.horizontal, 20)
 
                     CardStackView(viewModel: viewModel)
-                        .frame(height: 480)
+                        .frame(height: 540)
                         .padding(.horizontal, 20)
                 }
                 .padding(.top, 8)

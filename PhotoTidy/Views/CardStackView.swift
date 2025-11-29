@@ -10,6 +10,8 @@ struct CardStackView: View {
             let start = viewModel.currentIndex
             let end = min(viewModel.sessionItems.count, start + 3)
             let stackSlice = Array(viewModel.sessionItems[start..<end])
+            let cardWidth = min(geometry.size.width * 0.94, 520)
+            let cardHeight = geometry.size.height * 0.95
 
             HStack {
                 Spacer()
@@ -19,11 +21,12 @@ struct CardStackView: View {
                             item: item,
                             viewModel: viewModel,
                             dragOffset: $dragOffset,
-                            isTopCard: localIndex == 0
+                            isTopCard: localIndex == 0,
+                            cardSize: CGSize(width: cardWidth, height: cardHeight)
                         )
                     }
                 }
-                .frame(width: min(geometry.size.width * 0.88, 420), height: geometry.size.height)
+                .frame(width: cardWidth, height: cardHeight)
                 Spacer()
             }
         }
@@ -42,6 +45,7 @@ private struct SimpleCardWrapper: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
     @Binding var dragOffset: CGSize
     let isTopCard: Bool
+    let cardSize: CGSize
 
     private var swipeDirection: SwipeDirection {
         guard isTopCard else { return .none }
@@ -62,6 +66,7 @@ private struct SimpleCardWrapper: View {
     var body: some View {
         GeometryReader { geometry in
             PhotoCardView(item: item, viewModel: viewModel)
+                .frame(width: cardSize.width, height: cardSize.height)
                 .offset(isTopCard ? dragOffset : .zero)
                 .overlay(alignment: .topTrailing) {
                     if isTopCard {
