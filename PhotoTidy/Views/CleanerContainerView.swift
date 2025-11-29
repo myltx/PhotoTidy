@@ -214,52 +214,45 @@ private struct CleanerFooter: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
     
     var body: some View {
-        HStack {
-            Spacer()
-            
-            // Discard Button
-            Button(action: {
-                viewModel.markCurrentForDeletion()
-            }) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundColor(.red)
-                    .frame(width: 70, height: 70)
-                    .background(Color(UIColor.systemBackground))
-                    .clipShape(Circle())
-                    .shadow(color: .black.opacity(0.08), radius: 10, x: 0, y: 5)
+        HStack(spacing: 32) {
+            footerButton(
+                icon: "xmark",
+                foreground: .red,
+                background: Color(UIColor.systemBackground),
+                action: viewModel.markCurrentForDeletion
+            )
 
-            }
-            
-            Spacer()
-            
-            Text("SWIPE")
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                .foregroundColor(.gray.opacity(0.5))
-            
-            Spacer()
-            
-            // Keep Button
-            Button(action: {
-                viewModel.keepCurrent()
-            }) {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(width: 70, height: 70)
-                    .background(
-                        LinearGradient(
-                            gradient: Gradient(colors: [Color("brand-start"), Color("brand-end")]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .clipShape(Circle())
-                    .shadow(color: Color("brand-start").opacity(0.4), radius: 10, y: 5)
-            }
-            
-            Spacer()
+            footerButton(
+                icon: "arrow.up",
+                foreground: .orange,
+                background: Color(UIColor.systemBackground),
+                action: viewModel.skipCurrent
+            )
+
+            footerButton(
+                icon: "checkmark",
+                foreground: .white,
+                background: LinearGradient(
+                    gradient: Gradient(colors: [Color("brand-start"), Color("brand-end")]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                action: viewModel.keepCurrent
+            )
         }
         .padding(.bottom, 40)
+    }
+
+    @ViewBuilder
+    private func footerButton<Background: View>(icon: String, foreground: Color, background: Background, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 28, weight: .bold))
+                .foregroundColor(foreground)
+                .frame(width: 70, height: 70)
+                .background(background)
+                .clipShape(Circle())
+                .shadow(color: .black.opacity(0.08), radius: 10, x: 0, y: 5)
+        }
     }
 }

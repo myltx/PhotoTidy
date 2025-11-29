@@ -63,6 +63,8 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     private var loadedAssetIdentifiers: Set<String> = []
     private var hasStartedPagingLoader = false
     private var hasTriggeredBackgroundAnalysis = false
+    private var hasInitializedSession = false
+    private var sessionItemIds: Set<String> = []
 
     // MARK: - Computed Properties
     
@@ -202,17 +204,9 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
 
     func updateSessionItems(for filter: CleanupFilterMode) {
         self.currentFilter = filter
-        let notDeleted = items.filter { !$0.markedForDeletion && !isPhotoSkipped($0) }
-        
-        switch filter {
-        case .all: sessionItems = notDeleted
-        case .similar: sessionItems = notDeleted.filter { $0.similarGroupId != nil }
-        case .blurred: sessionItems = notDeleted.filter { $0.isBlurredOrShaky }
-        case .screenshots: sessionItems = notDeleted.filter { $0.isScreenshot || $0.isDocumentLike }
-        case .documents: sessionItems = notDeleted.filter { $0.isDocumentLike }
-        case .large: sessionItems = notDeleted.filter { $0.isLargeFile }
-        }
-        
+        let filtered = filteredItems(for: filter, from: items)
+        sessionItems = filtered
+        sessionItemIds = Set(filtered.map(\.id))
         currentIndex = 0
     }
 
@@ -220,7 +214,10 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         if let context = activeMonthContext {
             rebuildMonthSession(year: context.year, month: context.month)
         } else {
-            updateSessionItems(for: self.currentFilter)
+            let filtered = filteredItems(for: currentFilter, from: items)
+            sessionItems = filtered
+            sessionItemIds = Set(filtered.map(\.id))
+            currentIndex = min(currentIndex, max(sessionItems.count - 1, 0))
         }
     }
 
@@ -257,6 +254,8 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     private func resetPagingState() {
         loadedAssetIdentifiers.removeAll()
         hasTriggeredBackgroundAnalysis = false
+        hasInitializedSession = false
+        sessionItemIds.removeAll()
         items = []
         sessionItems = []
         currentIndex = 0
@@ -288,12 +287,24 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         if isLoading {
             isLoading = false
         }
-        if sessionItems.isEmpty {
+        if !hasInitializedSession {
+            hasInitializedSession = true
             updateSessionItems(for: currentFilter)
-        } else {
+        } else if !isShowingCleaner {
             refreshSession()
+        } else if activeMonthContext == nil {
+            appendIncomingToSession(newItems: incoming)
         }
         scheduleBackgroundAnalysisIfNeeded()
+    }
+
+    private func appendIncomingToSession(newItems: [PhotoItem]) {
+        guard !newItems.isEmpty else { return }
+        let filtered = filteredItems(for: currentFilter, from: newItems)
+            .filter { !sessionItemIds.contains($0.id) }
+        guard !filtered.isEmpty else { return }
+        sessionItems.append(contentsOf: filtered)
+        filtered.forEach { sessionItemIds.insert($0.id) }
     }
 
     private func applyCachedEntry(_ entry: PhotoAnalysisCacheEntry, to item: inout PhotoItem) {
@@ -650,6 +661,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             return
         }
         let removedIndex = currentIndex
+        sessionItemIds.remove(sessionItems[removedIndex].id)
         sessionItems.remove(at: removedIndex)
         if sessionItems.isEmpty {
             currentIndex = 0
@@ -906,6 +918,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         currentFilter = .all
         let storedProgress = timeMachineProgressStore.progress(year: year, month: month)?.processedCount ?? 0
         currentIndex = min(storedProgress, sessionItems.count)
+        sessionItemIds = Set(sessionItems.map(\.id))
     }
 
     private func restoreSelectionStates(in items: inout [PhotoItem]) {
@@ -1112,6 +1125,24 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             return !isPhotoSkipped(item)
         }
         return filtered.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
+    }
+
+    private func filteredItems(for filter: CleanupFilterMode, from collection: [PhotoItem]) -> [PhotoItem] {
+        let base = collection.filter { !$0.markedForDeletion && !isPhotoSkipped($0) }
+        switch filter {
+        case .all:
+            return base
+        case .similar:
+            return base.filter { $0.similarGroupId != nil }
+        case .blurred:
+            return base.filter { $0.isBlurredOrShaky }
+        case .screenshots:
+            return base.filter { $0.isScreenshot || $0.isDocumentLike }
+        case .documents:
+            return base.filter { $0.isDocumentLike }
+        case .large:
+            return base.filter { $0.isLargeFile }
+        }
     }
     
     private func currentSkippedSource() -> SkippedPhotoSource {

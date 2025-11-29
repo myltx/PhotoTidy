@@ -17,22 +17,28 @@ struct AssetRichPreviewView: View {
     @State private var animatedImage: UIImage?
     @State private var animatedDuration: Double = 0
     @State private var isAnimatedPlaying = false
+    @State private var isPreparingVideo = false
+
+    private var badgeStyle: PlaybackBadge.Style? {
+        switch asset.playbackStyle {
+        case .video, .videoLooping:
+            return nil
+        case .livePhoto:
+            return .livePhoto
+        default:
+            return nil
+        }
+    }
 
     private var requiresPlayButton: Bool {
-        switch asset.playbackStyle {
-        case .video, .videoLooping, .livePhoto, .imageAnimated:
-            return true
-        default:
-            return false
-        }
+        badgeStyle != nil
     }
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             previewView
-            playbackOverlay
-            if requiresPlayButton && !isPlaybackActive {
-                PlayBadge()
+            if let badgeStyle = badgeStyle, !isPlaybackActive {
+                PlaybackBadge(style: badgeStyle)
                     .padding(12)
                     .onTapGesture { startPlayback() }
             }
@@ -43,6 +49,14 @@ struct AssetRichPreviewView: View {
             isVideoPlaying = false
             isLivePhotoPlaying = false
             isAnimatedPlaying = false
+        }
+        .task(id: asset.localIdentifier) {
+            if asset.playbackStyle == .imageAnimated {
+                await autoPlayAnimatedImage()
+            }
+            if asset.playbackStyle == .video || asset.playbackStyle == .videoLooping {
+                prepareVideoIfNeeded()
+            }
         }
     }
 
@@ -60,42 +74,52 @@ struct AssetRichPreviewView: View {
     }
 
     @ViewBuilder
-    private var playbackOverlay: some View {
+    private var previewView: some View {
         switch asset.playbackStyle {
         case .video, .videoLooping:
-            if isVideoPlaying, let player {
-                VideoPlayer(player: player)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 260)
-                    .background(Color.black.opacity(0.6))
-                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .padding()
-                    .onAppear { player.play() }
+            ZStack {
+                if let player {
+                    VStack {
+                        Spacer()
+                        VideoPlayer(player: player)
+                            .frame(height: 260)
+                            .background(Color.black.opacity(0.6))
+                            .onAppear {
+                                player.pause()
+                                player.seek(to: .zero)
+                                player.isMuted = true
+                            }
+                        Spacer()
+                    }
+                } else {
+                    AssetThumbnailView(asset: asset, imageManager: imageManager, contentMode: contentMode)
+                        .frame(height: 260)
+                }
             }
         case .livePhoto:
-            if isLivePhotoPlaying {
-                LivePhotoPlayerView(asset: asset, isPlaying: $isLivePhotoPlaying)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 280)
+            ZStack {
+                AssetThumbnailView(asset: asset, imageManager: imageManager, contentMode: contentMode)
+                    .opacity(isLivePhotoPlaying ? 0 : 1)
+                if isLivePhotoPlaying {
+                    LivePhotoPlayerView(asset: asset, isPlaying: $isLivePhotoPlaying)
+                }
             }
         case .imageAnimated:
-            if isAnimatedPlaying, let image = animatedImage {
-                Image(uiImage: image)
+            if let animatedImage, isAnimatedPlaying {
+                Image(uiImage: animatedImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .background(Color.black.opacity(0.05))
+            } else {
+                AssetThumbnailView(asset: asset, imageManager: imageManager, contentMode: contentMode)
             }
         default:
-            EmptyView()
+            AssetThumbnailView(
+                asset: asset,
+                imageManager: imageManager,
+                contentMode: contentMode
+            )
         }
-    }
-
-    private var previewView: some View {
-        AssetThumbnailView(
-            asset: asset,
-            imageManager: imageManager,
-            contentMode: contentMode
-        )
     }
 
     private func startPlayback() {
@@ -109,14 +133,15 @@ struct AssetRichPreviewView: View {
                     preparePlayerObserver()
                     isVideoPlaying = player != nil
                     player?.seek(to: .zero)
+                    player?.isMuted = true
                     player?.play()
                 }
             }
         case .livePhoto:
             isLivePhotoPlaying = true
         case .imageAnimated:
-            if animatedImage == nil {
-                Task {
+            Task {
+                if animatedImage == nil {
                     if let payload = await loadAnimatedImage() {
                         await MainActor.run {
                             animatedImage = payload.image
@@ -124,9 +149,9 @@ struct AssetRichPreviewView: View {
                             playAnimatedImage()
                         }
                     }
+                } else {
+                    playAnimatedImage()
                 }
-            } else {
-                playAnimatedImage()
             }
         default:
             break
@@ -139,6 +164,36 @@ struct AssetRichPreviewView: View {
         let duration = animatedDuration > 0 ? animatedDuration : (animatedImage?.duration ?? 1.0)
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
             isAnimatedPlaying = false
+        }
+    }
+
+    private func autoPlayAnimatedImage() async {
+        if animatedImage == nil {
+            if let payload = await loadAnimatedImage() {
+                await MainActor.run {
+                    animatedImage = payload.image
+                    animatedDuration = payload.duration
+                }
+            }
+        }
+        await MainActor.run {
+            playAnimatedImage()
+        }
+    }
+
+    private func prepareVideoIfNeeded() {
+        guard asset.playbackStyle == .video || asset.playbackStyle == .videoLooping else { return }
+        if player != nil || isPreparingVideo { return }
+        isPreparingVideo = true
+        Task {
+            let loaded = await loadPlayer()
+            await MainActor.run {
+                player = loaded
+                player?.isMuted = true
+                player?.pause()
+                player?.seek(to: .zero)
+                isPreparingVideo = false
+            }
         }
     }
 
@@ -190,19 +245,35 @@ struct AssetRichPreviewView: View {
     }
 }
 
-private struct PlayBadge: View {
+private struct PlaybackBadge: View {
+    enum Style {
+        case livePhoto
+        case video
+    }
+
+    let style: Style
+
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "play.fill")
-                .font(.system(size: 12, weight: .bold))
-            Text("播放")
-                .font(.caption)
+        Image(systemName: systemImage)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundColor(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.black.opacity(0.65))
+            .clipShape(Capsule())
+    }
+
+    private var systemImage: String {
+        switch style {
+        case .livePhoto:
+            if #available(iOS 15.0, *) {
+                return "livephoto.play"
+            } else {
+                return "livephoto"
+            }
+        case .video:
+            return "play.fill"
         }
-        .foregroundColor(.white)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color.black.opacity(0.6))
-        .clipShape(Capsule())
     }
 }
 
@@ -229,7 +300,6 @@ private struct LivePhotoPlayerView: UIViewRepresentable {
         if isPlaying {
             let options = PHLivePhotoRequestOptions()
             options.deliveryMode = .highQualityFormat
-            options.isNetworkAccessAllowed = true
             options.isNetworkAccessAllowed = true
             PHImageManager.default().requestLivePhoto(
                 for: asset,
