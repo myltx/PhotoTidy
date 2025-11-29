@@ -28,6 +28,8 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     @Published var lastDeletedItemsCount: Int = 0
     @Published var deviceStorageUsage: DeviceStorageUsage = .empty
     @Published private(set) var monthStatuses: [String: MonthStatus] = [:]
+    @Published var albumFilters: [AlbumFilter] = [.all]
+    @Published var selectedAlbumFilter: AlbumFilter = .all
     
     // Navigation & Session State
     @Published var currentTab: AppView = .dashboard
@@ -65,6 +67,8 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     private var hasTriggeredBackgroundAnalysis = false
     private var hasInitializedSession = false
     private var sessionItemIds: Set<String> = []
+    private var selectedAlbumAssetIds: Set<String>?
+    private var hasLoadedAlbumFilters = false
 
     // MARK: - Computed Properties
     
@@ -221,6 +225,38 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         }
     }
 
+    func selectAlbumFilter(_ filter: AlbumFilter) {
+        guard selectedAlbumFilter != filter else { return }
+        selectedAlbumFilter = filter
+        if let collection = filter.collection {
+            selectedAlbumAssetIds = nil
+            hasInitializedSession = false
+            sessionItems = []
+            sessionItemIds.removeAll()
+            currentIndex = 0
+            Task.detached { [weak self] in
+                guard let self else { return }
+                let ids = await self.fetchAssetIdentifiers(in: collection)
+                await MainActor.run {
+                    self.selectedAlbumAssetIds = ids
+                    self.updateSessionItems(for: self.currentFilter)
+                }
+            }
+        } else {
+            selectedAlbumAssetIds = nil
+            updateSessionItems(for: currentFilter)
+        }
+    }
+
+    private func resetSessionForAlbumChange() {
+        hasInitializedSession = false
+        sessionItems = []
+        sessionItemIds.removeAll()
+        currentIndex = 0
+        updateSessionItems(for: currentFilter)
+        objectWillChange.send()
+    }
+
     // MARK: - Data Loading & Analysis
 
     func requestAuthorization() {
@@ -238,6 +274,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     func loadAssets() {
         guard authorizationStatus == .authorized || authorizationStatus == .limited else { return }
         isLoading = true
+        loadAlbumFiltersIfNeeded()
         startPagingLoader()
     }
 
@@ -248,6 +285,56 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         } else {
             hasStartedPagingLoader = true
             pagingLoader.start()
+        }
+    }
+
+    private func loadAlbumFiltersIfNeeded() {
+        guard !hasLoadedAlbumFilters else { return }
+        hasLoadedAlbumFilters = true
+        Task.detached { [weak self] in
+            guard let self else { return }
+            var filters: [AlbumFilter] = [.all]
+            var seen = Set<String>()
+            seen.insert(AlbumFilter.all.id)
+
+            let userCollections = PHCollectionList.fetchTopLevelUserCollections(with: nil)
+            userCollections.enumerateObjects { collection, _, _ in
+                guard let assetCollection = collection as? PHAssetCollection else { return }
+                let identifier = assetCollection.localIdentifier
+                guard !seen.contains(identifier) else { return }
+                seen.insert(identifier)
+                let name = collection.localizedTitle ?? "未命名"
+                filters.append(AlbumFilter(id: identifier, name: name, collection: assetCollection))
+            }
+
+            let smartAlbums = PHAssetCollection.fetchAssetCollections(with: .smartAlbum, subtype: .albumRegular, options: nil)
+            smartAlbums.enumerateObjects { collection, _, _ in
+                let identifier = collection.localIdentifier
+                guard !seen.contains(identifier) else { return }
+                seen.insert(identifier)
+                let name = collection.localizedTitle ?? "智能相册"
+                filters.append(AlbumFilter(id: identifier, name: name, collection: collection))
+            }
+
+            await MainActor.run {
+                self.albumFilters = filters
+                if !filters.contains(where: { $0.id == self.selectedAlbumFilter.id }) {
+                    self.selectedAlbumFilter = filters.first ?? .all
+                }
+            }
+        }
+    }
+
+    private func fetchAssetIdentifiers(in collection: PHAssetCollection) async -> Set<String> {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var identifiers = Set<String>()
+                let result = PHAsset.fetchAssets(in: collection, options: nil)
+                result.enumerateObjects { asset, _, _ in
+                    identifiers.insert(asset.localIdentifier)
+                }
+                continuation.resume(returning: identifiers)
+            }
         }
     }
 
@@ -1128,7 +1215,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     }
 
     private func filteredItems(for filter: CleanupFilterMode, from collection: [PhotoItem]) -> [PhotoItem] {
-        let base = collection.filter { !$0.markedForDeletion && !isPhotoSkipped($0) }
+        let base = collection.filter { !$0.markedForDeletion && !isPhotoSkipped($0) && isItemInSelectedAlbum($0) }
         switch filter {
         case .all:
             return base
@@ -1165,6 +1252,15 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         if item.isBlurredOrShaky { return true }
         if item.isLargeFile && !item.isVideo { return true }
         return false
+    }
+
+    private func isItemInSelectedAlbum(_ item: PhotoItem) -> Bool {
+        guard selectedAlbumFilter.collection != nil else { return true }
+        guard let ids = selectedAlbumAssetIds else {
+            // 尚未加载该相册的 asset ID，暂时视为不在相册中，等待加载完成
+            return false
+        }
+        return ids.contains(item.id)
     }
 
     private func isPhotoSkipped(_ item: PhotoItem) -> Bool {
@@ -1280,6 +1376,18 @@ struct DeviceStorageUsage {
     }
 }
 
+struct AlbumFilter: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let collection: PHAssetCollection?
+
+    static let all = AlbumFilter(id: "all", name: "全部相册", collection: nil)
+
+    static func == (lhs: AlbumFilter, rhs: AlbumFilter) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
 @MainActor
 extension PhotoCleanupViewModel: PhotoLoaderDelegate {
     func photoLoader(_ loader: PhotoLoader, didUpdateFetchResult fetchResult: PHFetchResult<PHAsset>) {
@@ -1295,5 +1403,15 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
 
     func photoLoader(_ loader: PhotoLoader, didLoadAssets assets: [PHAsset]) {
         ingestAssets(assets)
+        for asset in assets where asset.mediaType == .video || asset.mediaSubtypes.contains(.photoLive) {
+            preheatVideo(for: asset)
+        }
+    }
+
+    private func preheatVideo(for asset: PHAsset) {
+        let options = PHVideoRequestOptions()
+        options.deliveryMode = .mediumQualityFormat
+        options.isNetworkAccessAllowed = true
+        PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { _, _, _ in }
     }
 }

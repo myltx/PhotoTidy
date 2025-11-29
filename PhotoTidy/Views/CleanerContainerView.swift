@@ -22,7 +22,11 @@ struct CleanerContainerView: View {
 
             if viewModel.currentItem != nil {
                 VStack(spacing: 12) {
-                    SwipeDateHeaderView(date: viewModel.currentItem?.creationDate)
+                    HStack {
+                        SwipeDateHeaderView(date: viewModel.currentItem?.creationDate)
+                        AlbumFilterMenu(viewModel: viewModel)
+                    }
+                    .padding(.horizontal, 20)
 
                     CardStackView(viewModel: viewModel)
                         .frame(height: 480)
@@ -42,8 +46,6 @@ struct CleanerContainerView: View {
             Spacer()
 
             PhotoMetaView(viewModel: viewModel)
-
-            CleanerFooter(viewModel: viewModel)
         }
         .background(Color(UIColor.systemBackground).ignoresSafeArea())
         .sheet(isPresented: $showTrashSheet) {
@@ -137,46 +139,36 @@ private struct PhotoMetaView: View {
 private struct SwipeDateHeaderView: View {
     let date: Date?
 
-    private var monthYearText: String {
+    private var formattedText: String {
         guard let date = date else { return "全相册" }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "yyyy年 M月"
+        formatter.dateFormat = "yyyy年 M月 d日"
         return formatter.string(from: date)
     }
 
-    private var relativeDayText: String {
-        guard let date = date else { return "" }
-        let cal = Calendar.current
-        if cal.isDateInToday(date) {
-            return "今天"
-        } else if cal.isDateInYesterday(date) {
-            return "昨天"
-        } else {
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "zh_CN")
-            formatter.dateFormat = "M月d日"
-            return formatter.string(from: date)
-        }
+    var body: some View {
+        Text(formattedText)
+            .font(.headline.weight(.bold))
+            .foregroundColor(.primary)
     }
+}
+
+private struct AlbumFilterMenu: View {
+    @ObservedObject var viewModel: PhotoCleanupViewModel
 
     var body: some View {
-        VStack(spacing: 4) {
-            Text(monthYearText)
-                .font(.headline.weight(.bold))
-                .foregroundColor(.primary)
-            if !relativeDayText.isEmpty {
-                Text(relativeDayText)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.secondary)
-                    .textCase(.uppercase)
-                    .tracking(1.2)
+        Menu {
+            ForEach(viewModel.albumFilters) { filter in
+                Button(filter.name) {
+                    viewModel.selectAlbumFilter(filter)
+                }
             }
+        } label: {
+            Image(systemName: "line.3.horizontal.decrease.circle")
+                .font(.title3)
+                .foregroundColor(.primary)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 4)
-        .padding(.bottom, 10)
-        .padding(.horizontal, 24)
     }
 }
 
@@ -207,52 +199,5 @@ private struct TrashButton: View {
             }
         }
         .buttonStyle(.plain)
-    }
-}
-
-private struct CleanerFooter: View {
-    @ObservedObject var viewModel: PhotoCleanupViewModel
-    
-    var body: some View {
-        HStack(spacing: 32) {
-            footerButton(
-                icon: "xmark",
-                foreground: .red,
-                background: Color(UIColor.systemBackground),
-                action: viewModel.markCurrentForDeletion
-            )
-
-            footerButton(
-                icon: "arrow.up",
-                foreground: .orange,
-                background: Color(UIColor.systemBackground),
-                action: viewModel.skipCurrent
-            )
-
-            footerButton(
-                icon: "checkmark",
-                foreground: .white,
-                background: LinearGradient(
-                    gradient: Gradient(colors: [Color("brand-start"), Color("brand-end")]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                action: viewModel.keepCurrent
-            )
-        }
-        .padding(.bottom, 40)
-    }
-
-    @ViewBuilder
-    private func footerButton<Background: View>(icon: String, foreground: Color, background: Background, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 28, weight: .bold))
-                .foregroundColor(foreground)
-                .frame(width: 70, height: 70)
-                .background(background)
-                .clipShape(Circle())
-                .shadow(color: .black.opacity(0.08), radius: 10, x: 0, y: 5)
-        }
     }
 }

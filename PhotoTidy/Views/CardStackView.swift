@@ -6,22 +6,26 @@ struct CardStackView: View {
     @State private var dragOffset: CGSize = .zero
 
     var body: some View {
-        GeometryReader { _ in
+        GeometryReader { geometry in
             let start = viewModel.currentIndex
             let end = min(viewModel.sessionItems.count, start + 3)
             let stackSlice = Array(viewModel.sessionItems[start..<end])
 
-            ZStack {
-                ForEach(Array(stackSlice.enumerated().reversed()), id: \.element.id) { localIndex, item in
-                    SimpleCardWrapper(
-                        item: item,
-                        viewModel: viewModel,
-                        dragOffset: $dragOffset,
-                        isTopCard: localIndex == 0
-                    )
+            HStack {
+                Spacer()
+                ZStack {
+                    ForEach(Array(stackSlice.enumerated().reversed()), id: \.element.id) { localIndex, item in
+                        SimpleCardWrapper(
+                            item: item,
+                            viewModel: viewModel,
+                            dragOffset: $dragOffset,
+                            isTopCard: localIndex == 0
+                        )
+                    }
                 }
+                .frame(width: min(geometry.size.width * 0.88, 420), height: geometry.size.height)
+                Spacer()
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onChange(of: viewModel.currentIndex) { _ in
             dragOffset = .zero
