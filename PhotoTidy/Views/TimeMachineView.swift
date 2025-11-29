@@ -189,18 +189,20 @@ private struct TimeMachineHeader: View {
             }
             Spacer()
             HStack(spacing: 8) {
-                Button(action: onReset) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.counterclockwise.circle")
-                        Text("重置进度")
+                if FeatureToggles.showCleanupResetControls {
+                    Button(action: onReset) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.counterclockwise.circle")
+                            Text("重置进度")
+                        }
+                        .font(.system(size: 11, weight: .semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color(UIColor.systemGray5))
+                        .clipShape(Capsule())
                     }
-                    .font(.system(size: 11, weight: .semibold))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color(UIColor.systemGray5))
-                    .clipShape(Capsule())
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
 
                 Button(action: {}) {
                     HStack(spacing: 6) {
