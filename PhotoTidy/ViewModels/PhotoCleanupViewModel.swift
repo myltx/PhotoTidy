@@ -54,6 +54,15 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     private let analysisCache: PhotoAnalysisCacheStore
     private var assetsFetchResult: PHFetchResult<PHAsset>?
     private var cancellable: AnyCancellable?
+    private let zeroLatencyImageCache = ImageCache()
+    private lazy var pagingLoader: PhotoLoader = {
+        let loader = PhotoLoader(imageCache: zeroLatencyImageCache)
+        loader.delegate = self
+        return loader
+    }()
+    private var loadedAssetIdentifiers: Set<String> = []
+    private var hasStartedPagingLoader = false
+    private var hasTriggeredBackgroundAnalysis = false
 
     // MARK: - Computed Properties
     
@@ -147,7 +156,9 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         guard let fetchResult = assetsFetchResult,
               changeInstance.changeDetails(for: fetchResult) != nil else { return }
         DispatchQueue.main.async { [weak self] in
-            self?.loadAssets()
+            guard let self else { return }
+            self.resetPagingState()
+            self.pagingLoader.reloadLibrary()
         }
     }
     
@@ -230,56 +241,82 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     func loadAssets() {
         guard authorizationStatus == .authorized || authorizationStatus == .limited else { return }
         isLoading = true
-        
-        DispatchQueue.global(qos: .userInitiated).async {
-            var loadedItems: [PhotoItem] = []
-            let fetchOptions = PHFetchOptions()
-            fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-            
-            let allResult = PHAsset.fetchAssets(with: fetchOptions)
-            DispatchQueue.main.async {
-                self.assetsFetchResult = allResult
-            }
-            var currentIdentifiers: Set<String> = []
-            allResult.enumerateObjects { asset, _, _ in
-                let resources = PHAssetResource.assetResources(for: asset)
-                let fileSize = (resources.first?.value(forKey: "fileSize") as? Int) ?? 0
-                currentIdentifiers.insert(asset.localIdentifier)
-                let item = PhotoItem(
-                    id: asset.localIdentifier,
-                    asset: asset,
-                    pixelSize: CGSize(width: asset.pixelWidth, height: asset.pixelHeight),
-                    fileSize: fileSize,
-                    creationDate: asset.creationDate,
-                    isVideo: asset.mediaType == .video,
-                    isScreenshot: asset.mediaSubtypes.contains(.photoScreenshot),
-                    pHash: nil,
-                    blurScore: nil,
-                    exposureIsBad: false,
-                    isBlurredOrShaky: false,
-                    isDocumentLike: false,
-                    isTextImage: false,
-                    isLargeFile: fileSize > 10 * 1024 * 1024,
-                    similarGroupId: nil,
-                    similarityKind: nil,
-                    assetType: nil,
-                    markedForDeletion: false
-                )
-                loadedItems.append(item)
-            }
-            self.analysisCache.pruneMissingEntries(keeping: currentIdentifiers)
-            
-            DispatchQueue.main.async {
-                var restoredItems = loadedItems
-                self.restoreSelectionStates(in: &restoredItems)
-                self.applyCachedAnalysis(to: &restoredItems)
-                self.items = restoredItems
-                self.isLoading = false
-                self.syncSmartCleanupPendingFlag()
-                self.updateSessionItems(for: .all)
-                self.analyzeAllItemsInBackground()
-            }
+        startPagingLoader()
+    }
+
+    private func startPagingLoader() {
+        if hasStartedPagingLoader {
+            resetPagingState()
+            pagingLoader.reloadLibrary()
+        } else {
+            hasStartedPagingLoader = true
+            pagingLoader.start()
         }
+    }
+
+    private func resetPagingState() {
+        loadedAssetIdentifiers.removeAll()
+        hasTriggeredBackgroundAnalysis = false
+        items = []
+        sessionItems = []
+        currentIndex = 0
+        currentFilter = .all
+    }
+
+    private func ingestAssets(_ assets: [PHAsset]) {
+        guard !assets.isEmpty else { return }
+        let cacheEntries = analysisCache.snapshot()
+        var incoming: [PhotoItem] = []
+
+        for asset in assets {
+            let id = asset.localIdentifier
+            if loadedAssetIdentifiers.contains(id) { continue }
+            loadedAssetIdentifiers.insert(id)
+            let estimatedSize = assetResourceSize(for: asset)
+            var item = photoItem(for: asset, estimatedSize: estimatedSize)
+            if let entry = cacheEntries[id],
+               entry.version == PhotoAnalysisCacheEntry.currentVersion,
+               entry.fileSize == item.fileSize {
+                applyCachedEntry(entry, to: &item)
+            }
+            incoming.append(item)
+        }
+
+        guard !incoming.isEmpty else { return }
+        restoreSelectionStates(in: &incoming)
+        items.append(contentsOf: incoming)
+        if isLoading {
+            isLoading = false
+        }
+        if sessionItems.isEmpty {
+            updateSessionItems(for: currentFilter)
+        } else {
+            refreshSession()
+        }
+        scheduleBackgroundAnalysisIfNeeded()
+    }
+
+    private func applyCachedEntry(_ entry: PhotoAnalysisCacheEntry, to item: inout PhotoItem) {
+        item.isScreenshot = entry.isScreenshot
+        item.isDocumentLike = entry.isDocumentLike
+        item.isTextImage = entry.isTextImage
+        item.blurScore = entry.blurScore
+        item.isBlurredOrShaky = entry.isBlurredOrShaky
+        item.exposureIsBad = entry.exposureIsBad
+        item.pHash = entry.pHash
+        item.similarGroupId = entry.similarityGroupId
+        if let kindRaw = entry.similarityKind {
+            item.similarityKind = SimilarityGroupKind(rawValue: kindRaw)
+        } else {
+            item.similarityKind = nil
+        }
+        item.isLargeFile = item.fileSize > 15 * 1024 * 1024
+    }
+
+    private func scheduleBackgroundAnalysisIfNeeded() {
+        guard !hasTriggeredBackgroundAnalysis, !items.isEmpty else { return }
+        hasTriggeredBackgroundAnalysis = true
+        analyzeAllItemsInBackground()
     }
 
     private func analyzeAllItemsInBackground() {
@@ -584,6 +621,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
 
                 self.items = analyzedItems
                 self.isAnalyzing = false
+                self.hasTriggeredBackgroundAnalysis = false
                 self.refreshSession()
             }
         }
@@ -1186,5 +1224,23 @@ struct DeviceStorageUsage {
             totalBytes: total.int64Value,
             freeBytes: free.int64Value
         )
+    }
+}
+
+@MainActor
+extension PhotoCleanupViewModel: PhotoLoaderDelegate {
+    func photoLoader(_ loader: PhotoLoader, didUpdateFetchResult fetchResult: PHFetchResult<PHAsset>) {
+        assetsFetchResult = fetchResult
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            var identifiers: Set<String> = []
+            fetchResult.enumerateObjects { asset, _, _ in
+                identifiers.insert(asset.localIdentifier)
+            }
+            self?.analysisCache.pruneMissingEntries(keeping: identifiers)
+        }
+    }
+
+    func photoLoader(_ loader: PhotoLoader, didLoadAssets assets: [PHAsset]) {
+        ingestAssets(assets)
     }
 }
