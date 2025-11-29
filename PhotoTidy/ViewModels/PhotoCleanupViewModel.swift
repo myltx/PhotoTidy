@@ -202,7 +202,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
 
     func updateSessionItems(for filter: CleanupFilterMode) {
         self.currentFilter = filter
-        let notDeleted = items.filter { !$0.markedForDeletion }
+        let notDeleted = items.filter { !$0.markedForDeletion && !isPhotoSkipped($0) }
         
         switch filter {
         case .all: sessionItems = notDeleted
@@ -644,6 +644,21 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         updateMonthProgressIfNeeded(newValue: currentIndex)
     }
 
+    private func removeCurrentItemFromSession() {
+        guard !sessionItems.isEmpty else {
+            updateMonthProgressIfNeeded(newValue: 0)
+            return
+        }
+        let removedIndex = currentIndex
+        sessionItems.remove(at: removedIndex)
+        if sessionItems.isEmpty {
+            currentIndex = 0
+        } else if currentIndex >= sessionItems.count {
+            currentIndex = max(sessionItems.count - 1, 0)
+        }
+        updateMonthProgressIfNeeded(newValue: currentIndex)
+    }
+
     func markCurrentForDeletion() {
         guard let currentItem = currentItem else { return }
         if let index = items.firstIndex(where: { $0.id == currentItem.id }) {
@@ -655,18 +670,16 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     }
 
     func keepCurrent() {
-        if let currentItem = currentItem {
-            recordSkip(for: currentItem)
-        }
-        moveToNext()
+        guard let currentItem = currentItem else { return }
+        recordSkip(for: currentItem)
+        removeCurrentItemFromSession()
     }
     
     func skipCurrent() {
-        if let currentItem = currentItem {
-            logSkippedPhoto(currentItem, source: currentSkippedSource())
-            recordSkip(for: currentItem)
-        }
-        moveToNext()
+        guard let currentItem = currentItem else { return }
+        logSkippedPhoto(currentItem, source: currentSkippedSource())
+        recordSkip(for: currentItem)
+        removeCurrentItemFromSession()
     }
     
     func toggleDeletion(for item: PhotoItem) {
@@ -1095,7 +1108,8 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         let filtered = items.filter { item in
             guard !item.markedForDeletion, let date = item.creationDate else { return false }
             let comps = calendar.dateComponents([.year, .month], from: date)
-            return comps.year == year && comps.month == month
+            guard comps.year == year && comps.month == month else { return false }
+            return !isPhotoSkipped(item)
         }
         return filtered.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
     }
@@ -1120,6 +1134,14 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         if item.isBlurredOrShaky { return true }
         if item.isLargeFile && !item.isVideo { return true }
         return false
+    }
+
+    private func isPhotoSkipped(_ item: PhotoItem) -> Bool {
+        guard let comps = monthComponents(for: item),
+              let progress = timeMachineProgressStore.progress(year: comps.year, month: comps.month) else {
+            return false
+        }
+        return progress.skippedPhotoIds.contains(item.id)
     }
 
     private func monthKey(year: Int, month: Int) -> String {
