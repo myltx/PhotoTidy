@@ -34,6 +34,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     @Published var isShowingCleaner: Bool = false
     @Published var activeDetail: DashboardDetail?
     @Published var isShowingSuccessSummary: Bool = false
+    @Published var settingsNavigationPath = NavigationPath()
     
     @Published var currentFilter: CleanupFilterMode = .all
     @Published var currentIndex: Int = 0 {

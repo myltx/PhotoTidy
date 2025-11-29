@@ -3,10 +3,9 @@ import Photos
 
 struct SettingsView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
-    @State private var navigationPath = NavigationPath()
     
     var body: some View {
-        NavigationStack(path: $navigationPath) {
+        NavigationStack(path: settingsPathBinding) {
             ZStack {
                 blurredBackground
                 
@@ -54,6 +53,13 @@ private enum SettingsRoute: Hashable {
 }
 
 private extension SettingsView {
+    var settingsPathBinding: Binding<NavigationPath> {
+        Binding(
+            get: { viewModel.settingsNavigationPath },
+            set: { viewModel.settingsNavigationPath = $0 }
+        )
+    }
+    
     var blurredBackground: some View {
         ZStack {
             Rectangle()
