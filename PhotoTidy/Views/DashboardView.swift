@@ -254,7 +254,7 @@ private extension DashboardView {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
-                        .background(Color.white)
+                        .background(Color(UIColor.systemBackground))
                         .foregroundColor(Color("brand-start"))
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .shadow(color: .black.opacity(0.2), radius: 10, y: 6)
