@@ -345,6 +345,12 @@ struct SimilarComparisonView: View {
 
     /// 跳过当前组：只是简单跳到下一组，不做「保留最佳」操作
     private func skipCurrentGroup() {
+        if let group = currentGroup {
+            let heroIdx = currentHeroIndex(in: group, defaultIndex: recommendedIndex(for: group))
+            if heroIdx < group.count {
+                viewModel.logSkippedPhoto(group[heroIdx], source: .similarGroup)
+            }
+        }
         moveToNextGroupOrDismiss()
     }
 

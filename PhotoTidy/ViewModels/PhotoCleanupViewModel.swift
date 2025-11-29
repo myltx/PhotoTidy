@@ -47,7 +47,9 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     let imageManager = PHCachingImageManager()
     private let timeMachineProgressStore: TimeMachineProgressStore
     private let smartCleanupProgressStore: SmartCleanupProgressStore
+    private let skippedPhotoStore: SkippedPhotoStore
     @Published private(set) var smartCleanupProgress: SmartCleanupProgress?
+    @Published private(set) var skippedPhotoRecords: [SkippedPhotoRecord] = []
     private let analysisCache: PhotoAnalysisCacheStore
     private var assetsFetchResult: PHFetchResult<PHAsset>?
     private var cancellable: AnyCancellable?
@@ -96,12 +98,15 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     init(
         timeMachineProgressStore: TimeMachineProgressStore = TimeMachineProgressStore(),
         smartCleanupProgressStore: SmartCleanupProgressStore = SmartCleanupProgressStore(),
+        skippedPhotoStore: SkippedPhotoStore = SkippedPhotoStore(),
         analysisCache: PhotoAnalysisCacheStore = PhotoAnalysisCacheStore()
     ) {
         self.analysisCache = analysisCache
         self.timeMachineProgressStore = timeMachineProgressStore
         self.smartCleanupProgressStore = smartCleanupProgressStore
+        self.skippedPhotoStore = skippedPhotoStore
         self.smartCleanupProgress = smartCleanupProgressStore.load()
+        self.skippedPhotoRecords = skippedPhotoStore.allRecords()
         super.init()
         PHPhotoLibrary.shared().register(self)
         refreshDeviceStorageUsage()
@@ -619,6 +624,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     
     func skipCurrent() {
         if let currentItem = currentItem {
+            logSkippedPhoto(currentItem, source: currentSkippedSource())
             recordSkip(for: currentItem)
         }
         moveToNext()
@@ -950,6 +956,32 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         }
     }
 
+    private func refreshSkippedPhotoRecords() {
+        skippedPhotoRecords = skippedPhotoStore.allRecords()
+    }
+
+    func logSkippedPhoto(_ item: PhotoItem, source: SkippedPhotoSource) {
+        skippedPhotoStore.record(photoId: item.id, source: source)
+        refreshSkippedPhotoRecords()
+    }
+
+    func markSkippedRecordsProcessed(ids: [String]) {
+        guard !ids.isEmpty else { return }
+        skippedPhotoStore.markProcessed(ids: ids)
+        refreshSkippedPhotoRecords()
+    }
+
+    func deleteSkippedRecords(ids: [String]) {
+        guard !ids.isEmpty else { return }
+        skippedPhotoStore.remove(ids: ids)
+        refreshSkippedPhotoRecords()
+    }
+
+    func clearSkippedRecords() {
+        skippedPhotoStore.clear()
+        refreshSkippedPhotoRecords()
+    }
+
     private func persistSelectionState(for item: PhotoItem) {
         guard let comps = monthComponents(for: item) else { return }
         timeMachineProgressStore.setPhoto(item.id, year: comps.year, month: comps.month, markedForDeletion: item.markedForDeletion)
@@ -997,6 +1029,20 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             return comps.year == year && comps.month == month
         }
         return filtered.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
+    }
+    
+    private func currentSkippedSource() -> SkippedPhotoSource {
+        if activeMonthContext != nil {
+            return .timeMachine
+        }
+        switch currentFilter {
+        case .similar: return .similar
+        case .blurred: return .blurred
+        case .screenshots: return .screenshots
+        case .documents: return .documents
+        case .large: return .large
+        default: return .smart
+        }
     }
 
     private func shouldFlagForCleanup(_ item: PhotoItem) -> Bool {

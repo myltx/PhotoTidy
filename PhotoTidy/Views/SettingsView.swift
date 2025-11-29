@@ -296,6 +296,42 @@ private extension SettingsView {
                 .padding(.horizontal, 4)
             
             VStack(spacing: 0) {
+                NavigationLink {
+                    SkippedPhotosView(viewModel: viewModel)
+                } label: {
+                    HStack {
+                        HStack(spacing: 12) {
+                            dataIcon(background: Color.purple.opacity(0.12))
+                                .overlay(
+                                    Image(systemName: "square.stack.3d.down.forward")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundColor(Color.purple)
+                                )
+                            Text("待确认照片")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.primary)
+                        }
+                        Spacer()
+                        HStack(spacing: 8) {
+                            Text("\(viewModel.skippedPhotoRecords.count) 张")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(Color.purple)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.purple.opacity(0.12))
+                                .clipShape(Capsule())
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.secondary.opacity(0.4))
+                        }
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 18)
+                }
+                .buttonStyle(.plain)
+                
+                Divider().padding(.leading, 56)
+                
                 HStack(spacing: 12) {
                     dataIcon(background: Color.indigo.opacity(0.12))
                         .overlay(
