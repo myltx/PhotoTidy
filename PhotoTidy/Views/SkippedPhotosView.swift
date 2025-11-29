@@ -134,8 +134,11 @@ struct SkippedPhotosView: View {
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(.primary)
                     .frame(width: 44, height: 44)
-                    .background(Color.white)
+                    .background(Color(UIColor.systemBackground))
                     .clipShape(Circle())
+                    .overlay(
+                        Circle().stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+                    )
                     .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
             }
             .buttonStyle(.plain)

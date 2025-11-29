@@ -3,9 +3,10 @@ import Photos
 
 struct SettingsView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
+    @State private var navigationPath = NavigationPath()
     
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             ZStack {
                 blurredBackground
                 
@@ -32,8 +33,24 @@ struct SettingsView: View {
                 .ignoresSafeArea(edges: .top)
             }
             .navigationBarHidden(true)
+            .navigationDestination(for: SettingsRoute.self) { route in
+                switch route {
+                case .preferences:
+                    PreferencesView(viewModel: viewModel)
+                case .advanced:
+                    AdvancedOperationsView(viewModel: viewModel)
+                case .permissions:
+                    PermissionsView(viewModel: viewModel)
+                }
+            }
         }
     }
+}
+
+private enum SettingsRoute: Hashable {
+    case preferences
+    case advanced
+    case permissions
 }
 
 private extension SettingsView {
@@ -138,28 +155,25 @@ private extension SettingsView {
                     title: "偏好设置",
                     description: "忽略收藏、删除确认、主题样式",
                     systemImage: "slider.horizontal.3",
-                    tint: .blue
-                ) {
-                    PreferencesView(viewModel: viewModel)
-                }
+                    tint: .blue,
+                    route: .preferences
+                )
                 
                 moduleLink(
                     title: "高级操作",
                     description: "清空待删区、重置进度等",
                     systemImage: "wand.and.stars",
-                    tint: .orange
-                ) {
-                    AdvancedOperationsView(viewModel: viewModel)
-                }
+                    tint: .orange,
+                    route: .advanced
+                )
                 
                 moduleLink(
                     title: "系统权限",
                     description: "照片权限及系统授权管理",
                     systemImage: "lock.shield",
-                    tint: .green
-                ) {
-                    PermissionsView(viewModel: viewModel)
-                }
+                    tint: .green,
+                    route: .permissions
+                )
             }
             .background(SettingsStyle.sectionBackground)
             .cornerRadius(22)
@@ -269,16 +283,14 @@ private extension SettingsView {
         }
     }
     
-    private func moduleLink<Destination: View>(
+    private func moduleLink(
         title: String,
         description: String,
         systemImage: String,
         tint: Color,
-        destination: @escaping () -> Destination
+        route: SettingsRoute
     ) -> some View {
-        NavigationLink {
-            destination()
-        } label: {
+        NavigationLink(value: route) {
             HStack(spacing: 10) {
                 iconBadge(systemName: systemImage, color: tint)
                 VStack(alignment: .leading, spacing: 2) {
@@ -396,6 +408,39 @@ private struct SettingsToggleStyle: ToggleStyle {
     }
 }
 
+private struct SettingsSubpageHeader: View {
+    let title: String
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        HStack {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.primary)
+                    .frame(width: 42, height: 42)
+                    .background(Color(UIColor.systemBackground))
+                    .clipShape(Circle())
+                    .overlay(
+                        Circle().stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+                    )
+                    .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+            }
+            .buttonStyle(.plain)
+            
+            Spacer()
+            Text(title)
+                .font(.system(size: 18, weight: .semibold))
+            Spacer()
+            Color.clear.frame(width: 42, height: 42)
+        }
+        .padding(.horizontal, 4)
+        .padding(.bottom, 6)
+    }
+}
+
 struct PreferencesView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
     @State private var ignoreFavorites = true
@@ -403,14 +448,16 @@ struct PreferencesView: View {
     
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
+            VStack(spacing: 20) {
+                SettingsSubpageHeader(title: "偏好设置")
                 preferenceToggles
                 themeSelector
             }
             .padding(20)
         }
         .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
-        .navigationTitle("偏好设置")
+        .toolbar(.hidden, for: .tabBar)
+        .navigationBarHidden(true)
     }
     
     private var preferenceToggles: some View {
@@ -496,13 +543,14 @@ struct AdvancedOperationsView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
+                SettingsSubpageHeader(title: "高级操作")
                 clearCacheTile
                 resetProgressTile
             }
             .padding(20)
         }
         .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
-        .navigationTitle("高级操作")
+        .toolbar(.hidden, for: .tabBar)
         .alert("确认清空待删区缓存？", isPresented: $showingClearPendingAlert) {
             Button("取消", role: .cancel) {}
             Button("清空", role: .destructive) {
@@ -519,6 +567,7 @@ struct AdvancedOperationsView: View {
         } message: {
             Text("将同时清除首页全相册整理与时光机（月度）的进度记录，恢复初始状态。")
         }
+        .navigationBarHidden(true)
     }
     
     private var clearCacheTile: some View {
@@ -606,9 +655,9 @@ struct AdvancedOperationsView: View {
     }
     
     private func dataIcon(background: Color) -> some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
+        RoundedRectangle(cornerRadius: 11, style: .continuous)
             .fill(background)
-            .frame(width: 40, height: 40)
+            .frame(width: 36, height: 36)
     }
 }
 
@@ -618,6 +667,7 @@ struct PermissionsView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
+                SettingsSubpageHeader(title: "系统权限")
                 photoPermissionTile
                 placeholderTile(title: "通知权限", icon: "bell.badge")
                 placeholderTile(title: "相机权限", icon: "camera")
@@ -625,7 +675,8 @@ struct PermissionsView: View {
             .padding(20)
         }
         .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
-        .navigationTitle("系统权限")
+        .toolbar(.hidden, for: .tabBar)
+        .navigationBarHidden(true)
     }
     
     private var photoPermissionTile: some View {
@@ -698,9 +749,9 @@ struct PermissionsView: View {
     }
     
     private func iconBadge(systemName: String, color: Color) -> some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
+        RoundedRectangle(cornerRadius: 11, style: .continuous)
             .fill(color.opacity(0.12))
-            .frame(width: 40, height: 40)
+            .frame(width: 36, height: 36)
             .overlay(
                 Image(systemName: systemName)
                     .foregroundColor(color)
