@@ -7,15 +7,7 @@ struct LargeFilesView: View {
 
     @State private var sortDescending: Bool = true
     @State private var showingTrash: Bool = false
-
-    private var largeItems: [PhotoItem] {
-        let base = viewModel.items.filter { $0.isLargeFile }
-        let sorted = base.sorted {
-            sortDescending ? $0.fileSize > $1.fileSize : $0.fileSize < $1.fileSize
-        }
-        // 设计稿中展示“占用空间前 10 名”
-        return Array(sorted.prefix(10))
-    }
+    @State private var selectedCountOption: LargeFileCountOption = .ten
 
     private var selectedLargeItems: [PhotoItem] {
         viewModel.pendingDeletionItems.filter { $0.isLargeFile }
@@ -23,6 +15,12 @@ struct LargeFilesView: View {
 
     private var selectedTotalSize: Int {
         selectedLargeItems.reduce(0) { $0 + $1.fileSize }
+    }
+    private var largeItems: [PhotoItem] {
+        let sorted = viewModel.items
+            .filter { $0.isLargeFile }
+            .sorted { sortDescending ? $0.fileSize > $1.fileSize : $0.fileSize < $1.fileSize }
+        return Array(sorted.prefix(selectedCountOption.limit))
     }
 
     var body: some View {
@@ -39,9 +37,14 @@ struct LargeFilesView: View {
 
                 if largeItems.isEmpty {
                     Spacer()
-                    Text("未检测到大文件")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                    VStack(spacing: 8) {
+                        Image(systemName: "internaldrive")
+                            .font(.system(size: 36))
+                            .foregroundColor(.secondary)
+                        Text("未检测到大文件")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
                     Spacer()
                 } else {
                     ScrollView {
@@ -76,32 +79,70 @@ struct LargeFilesView: View {
     }
 
     private var headerSection: some View {
-        HStack(alignment: .lastTextBaseline) {
+        HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("占用空间前 10 名")
+                Text("显示前 \(selectedCountOption.displayText) 个大文件")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
 
             Spacer()
 
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    sortDescending.toggle()
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Text("排序")
-                        .font(.system(size: 11, weight: .bold))
-                    Image(systemName: sortDescending ? "arrow.down.to.line.compact" : "arrow.up.to.line.compact")
-                        .font(.system(size: 11, weight: .bold))
-                }
-                .foregroundColor(Color("brand-start"))
-            }
+            rankingButton
+            sortButton
         }
         .padding(.horizontal, 24)
         .padding(.top, 24)
-        .padding(.bottom, 8)
+        .padding(.bottom, 12)
+    }
+    
+    private var sortButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                sortDescending.toggle()
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text("排序")
+                    .font(.system(size: 11, weight: .bold))
+                Image(systemName: sortDescending ? "arrow.down.to.line.compact" : "arrow.up.to.line.compact")
+                    .font(.system(size: 11, weight: .bold))
+            }
+            .foregroundColor(Color("brand-start"))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color(UIColor.secondarySystemBackground))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var rankingButton: some View {
+        Menu {
+            ForEach(LargeFileCountOption.allCases, id: \.self) { option in
+                Button(action: { selectedCountOption = option }) {
+                    HStack {
+                        Text(option.title)
+                        if option == selectedCountOption {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text("TOP \(selectedCountOption.displayText)")
+                    .font(.system(size: 11, weight: .bold))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 11, weight: .bold))
+            }
+            .foregroundColor(Color("brand-start"))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color(UIColor.secondarySystemBackground))
+            .clipShape(Capsule())
+        }
+        .menuStyle(.automatic)
     }
 
     // 大卡片：展示第一名大文件
@@ -276,3 +317,4 @@ struct LargeFilesView: View {
         }
     }
 }
+    

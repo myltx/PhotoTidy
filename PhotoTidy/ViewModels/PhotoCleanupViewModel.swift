@@ -521,6 +521,33 @@ final class PhotoCleanupViewModel: ObservableObject {
             refreshSession()
         }
     }
+    
+    func photoItem(for asset: PHAsset, estimatedSize: Int) -> PhotoItem {
+        if let existing = items.first(where: { $0.id == asset.localIdentifier }) {
+            return existing
+        }
+        
+        return PhotoItem(
+            id: asset.localIdentifier,
+            asset: asset,
+            pixelSize: CGSize(width: asset.pixelWidth, height: asset.pixelHeight),
+            fileSize: estimatedSize,
+            creationDate: asset.creationDate,
+            isVideo: asset.mediaType == .video,
+            isScreenshot: asset.mediaSubtypes.contains(.photoScreenshot),
+            pHash: nil,
+            blurScore: nil,
+            exposureIsBad: false,
+            isBlurredOrShaky: false,
+            isDocumentLike: false,
+            isTextImage: false,
+            isLargeFile: estimatedSize > 10 * 1024 * 1024,
+            similarGroupId: nil,
+            similarityKind: nil,
+            assetType: nil,
+            markedForDeletion: false
+        )
+    }
 
     private func revalidateSimilarGroups() {
         var groupCounts = [Int: Int]()
@@ -647,6 +674,56 @@ final class PhotoCleanupViewModel: ObservableObject {
     private func monthKey(year: Int, month: Int) -> String {
         "\(year)-\(month)"
     }
+    
+    func assetResourceSize(for asset: PHAsset) -> Int {
+        let resources = PHAssetResource.assetResources(for: asset)
+        if asset.mediaType == .video {
+            if let video = resources.first(where: { $0.type == .video }),
+               let size = video.value(forKey: "fileSize") as? Int {
+                return size
+            }
+        }
+        if let primary = resources.first,
+           let size = primary.value(forKey: "fileSize") as? Int {
+            return size
+        }
+        return max(asset.pixelWidth * asset.pixelHeight * 4, 0)
+    }
+    
+    func fetchAssets(in sizeRange: SizeRange, limit: Int? = nil) -> [PHAsset] {
+        let fetchOptions = PHFetchOptions()
+        fetchOptions.sortDescriptors = []
+        let result = PHAsset.fetchAssets(with: fetchOptions)
+        var sized: [(PHAsset, Int)] = []
+        result.enumerateObjects { asset, _, _ in
+            let size = self.assetResourceSize(for: asset)
+            if sizeRange.contains(size) {
+                sized.append((asset, size))
+            }
+        }
+        let sorted = sized.sorted { $0.1 > $1.1 }
+        if let limit, limit > 0 {
+            return Array(sorted.prefix(limit)).map { $0.0 }
+        }
+        return sorted.map { $0.0 }
+    }
+}
+
+struct SizeRange: Hashable {
+    let minBytes: Int
+    let maxBytes: Int?
+    
+    func contains(_ size: Int) -> Bool {
+        guard size >= minBytes else { return false }
+        if let maxBytes {
+            return size <= maxBytes
+        }
+        return true
+    }
+    
+    static let medium = SizeRange(minBytes: 10 * 1_024 * 1_024, maxBytes: 20 * 1_024 * 1_024)
+    static let large = SizeRange(minBytes: 20 * 1_024 * 1_024, maxBytes: 50 * 1_024 * 1_024)
+    static let ultra = SizeRange(minBytes: 50 * 1_024 * 1_024, maxBytes: nil)
 }
 
 struct DeviceStorageUsage {
