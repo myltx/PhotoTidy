@@ -284,6 +284,7 @@ struct LargeFilesView: View {
                         .font(.system(size: 13, weight: .semibold))
                     Text("总计 \(selectedTotalSize.fileSizeDescription)")
                         .font(.system(size: 11))
+                    
                         .foregroundColor(.secondary)
                 }
 

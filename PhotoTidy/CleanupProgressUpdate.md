@@ -25,8 +25,12 @@
 
 5. **Dashboard & ViewModel 联动**  
    - `PhotoCleanupViewModel` 现在同时注入 `TimeMachineProgressStore` 与 `SmartCleanupProgressStore`，并新增 `smartCleanupResumeInfo`/`resumeSmartCleanup()`。  
-   - `DashboardView` 的英雄卡片完全依赖 `SmartCleanupProgress` 与全局待删状态，月度进度不再影响首页逻辑。  
-   - 待删区任何变更都会同步更新 `SmartCleanupProgress` 的 `hasPendingItems`，确保首页提示与实际状态一致。
+   - `DashboardView` 的英雄卡片仅依赖 `SmartCleanupProgress` 保存的分类与锚点，待删区不再决定是否显示“继续整理”，真正实现与全相册处理入口的解耦。  
+   - 仅在用户实际浏览卡片时更新锚点；待删区的变化只同步 `hasPendingItems`，不会自动生成进度记录。
+
+6. **时光机强化**  
+   - 月份卡片新增“上次停留日期 + 已整理数量”提示，直接反映 `TimeMachineMonthProgress` 中的 `processedCount`。  
+   - 顶部工具栏提供“重置进度”按钮，调用 `resetTimeMachineProgress()` 仅清除时光机数据，不影响首页智能清理。
 
 ## 数据字段与含义
 | 字段 | 说明 |

@@ -40,13 +40,13 @@ struct DashboardView: View {
             }
             .navigationBarHidden(true)
         }
-        .alert("确定重置清理进度？", isPresented: $showingResumeResetAlert) {
+        .alert("清除全相册整理进度？", isPresented: $showingResumeResetAlert) {
             Button("取消", role: .cancel) {}
             Button("重置", role: .destructive) {
-                viewModel.resetCleanupProgress()
+                viewModel.resetSmartCleanupProgressOnly()
             }
         } message: {
-            Text("清除所有整理进度与选择记录，重新开始全相册整理。")
+            Text("仅重置首页全相册整理进度，时光机（月度）记录不受影响。")
         }
     }
 }

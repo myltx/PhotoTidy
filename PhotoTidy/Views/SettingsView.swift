@@ -46,13 +46,13 @@ struct SettingsView: View {
         } message: {
             Text("这只会移除 App 内暂存的待删除列表，不会影响系统相册。")
         }
-        .alert("重置所有清理进度？", isPresented: $showingResetProgressAlert) {
+        .alert("重置全局清理进度？", isPresented: $showingResetProgressAlert) {
             Button("取消", role: .cancel) {}
             Button("重置", role: .destructive) {
                 viewModel.resetCleanupProgress()
             }
         } message: {
-            Text("会清除所有月份的处理进度与选择记录，下次将从头开始。")
+            Text("将同时清除首页全相册整理与时光机（月度）的进度记录，恢复初始状态。")
         }
     }
 }
@@ -343,7 +343,7 @@ private extension SettingsView {
                             Text("重置清理进度")
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundColor(.primary)
-                            Text("下次将从头开始扫描")
+                            Text("全相册与月份记录都会被重置")
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundColor(.secondary)
                                 .textCase(.uppercase)

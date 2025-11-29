@@ -3,6 +3,7 @@ import Photos
 
 struct TimeMachineView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
+    @State private var showingResetAlert = false
 
     private var sections: [YearSection] {
         aggregate(from: viewModel.items)
@@ -28,7 +29,9 @@ struct TimeMachineView: View {
                                     .padding(.horizontal, 24)
                             } else {
                                 VStack(spacing: 28) {
-                                    TimeMachineHeader()
+                                    TimeMachineHeader(onReset: {
+                                        showingResetAlert = true
+                                    })
                                         .padding(.horizontal, 20)
                                         .padding(.top, 24)
 
@@ -58,6 +61,14 @@ struct TimeMachineView: View {
                 .ignoresSafeArea(edges: .top)
             }
             .navigationBarHidden(true)
+        }
+        .alert("重置时光机进度？", isPresented: $showingResetAlert) {
+            Button("取消", role: .cancel) {}
+            Button("重置", role: .destructive) {
+                viewModel.resetTimeMachineProgress()
+            }
+        } message: {
+            Text("将清除所有月份的整理进度与选择记录，重新开始按月份整理。")
         }
     }
 }
@@ -100,6 +111,10 @@ private extension TimeMachineView {
         formatterEN.locale = .init(identifier: "en_US")
         formatterEN.dateFormat = "MMM"
 
+        let progressFormatter = DateFormatter()
+        progressFormatter.locale = .init(identifier: "zh_CN")
+        progressFormatter.dateFormat = "M月d日"
+
         let grouped = Dictionary(grouping: items) { (item: PhotoItem) -> String in
             let date = item.creationDate ?? Date()
             let comps = Calendar.current.dateComponents([.year, .month], from: date)
@@ -119,6 +134,18 @@ private extension TimeMachineView {
 
             let status = viewModel.monthStatuses[key] ?? viewModel.computeMonthStatus(photos: value)
             let isCurrentMonth = Calendar.current.isDate(monthDate, equalTo: Date(), toGranularity: .month)
+            let progress = viewModel.timeMachineProgress(year: year, month: month)
+            let processedCount = progress?.processedCount ?? 0
+            var progressDescription: String?
+            if processedCount > 0, !sorted.isEmpty {
+                let cappedCount = min(processedCount, sorted.count)
+                let clampedIndex = min(max(cappedCount - 1, 0), sorted.count - 1)
+                if clampedIndex < sorted.count {
+                    let date = sorted[clampedIndex].creationDate ?? monthDate
+                    let dateText = progressFormatter.string(from: date)
+                    progressDescription = "上次停留：\(dateText) · 已整理 \(cappedCount)/\(sorted.count) 张"
+                }
+            }
 
             return MonthSummary(
                 id: key,
@@ -129,7 +156,9 @@ private extension TimeMachineView {
                 totalCount: status.totalPhotos,
                 status: status,
                 isCurrentMonth: isCurrentMonth,
-                sampleItems: Array(sorted.prefix(2))
+                sampleItems: Array(sorted.prefix(2)),
+                processedCount: processedCount,
+                progressDescription: progressDescription
             )
         }
         .sorted { lhs, rhs in
@@ -147,6 +176,8 @@ private extension TimeMachineView {
 // MARK: - Header & Highlight
 
 private struct TimeMachineHeader: View {
+    var onReset: () -> Void
+
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
@@ -157,20 +188,35 @@ private struct TimeMachineHeader: View {
                     .foregroundColor(.secondary)
             }
             Spacer()
-            Button(action: {}) {
-                HStack(spacing: 6) {
-                    Text("全部时间")
-                        .font(.system(size: 12, weight: .semibold))
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .bold))
+            HStack(spacing: 8) {
+                Button(action: onReset) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.counterclockwise.circle")
+                        Text("重置进度")
+                    }
+                    .font(.system(size: 11, weight: .semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color(UIColor.systemGray5))
+                    .clipShape(Capsule())
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(headerButtonBackground)
-                .clipShape(Capsule())
-                .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
+                .buttonStyle(.plain)
+
+                Button(action: {}) {
+                    HStack(spacing: 6) {
+                        Text("全部时间")
+                            .font(.system(size: 12, weight: .semibold))
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(headerButtonBackground)
+                    .clipShape(Capsule())
+                    .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
     }
 
@@ -323,6 +369,13 @@ private struct FeaturedMonthCard: View {
                         Text("本月拍摄 \(summary.totalCount) 张")
                             .font(.system(size: 12))
                             .foregroundColor(.white.opacity(0.85))
+                        
+                        if let progressText = summary.progressDescription {
+                            Text(progressText)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(Color.white.opacity(0.85))
+                                .padding(.top, 2)
+                        }
                     }
 
                     Spacer()
@@ -405,6 +458,11 @@ private struct StandardMonthCard: View {
                 Text("拍摄 \(summary.totalCount) 张")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
+                if let progressText = summary.progressDescription {
+                    Text(progressText)
+                        .font(.system(size: 11))
+                        .foregroundColor(Color("brand-start"))
+                }
             }
 
             Spacer()
@@ -492,6 +550,8 @@ private struct MonthSummary: Identifiable {
     let status: MonthStatus
     let isCurrentMonth: Bool
     let sampleItems: [PhotoItem]
+    let processedCount: Int
+    let progressDescription: String?
 }
 
 private struct YearSection: Identifiable {

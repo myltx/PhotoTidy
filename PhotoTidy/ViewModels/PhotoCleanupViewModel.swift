@@ -66,29 +66,19 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     }
     
     var smartCleanupResumeInfo: SmartCleanupResumeInfo? {
-        let pendingCount = pendingDeletionItems.count
-        if let progress = smartCleanupProgress {
-            let hasPending = pendingCount > 0 || progress.hasPendingItems
-            if progress.lastPhotoId == nil && !hasPending {
-                return nil
-            }
-            let anchorPhoto = progress.lastPhotoId.flatMap { id in
-                items.first { $0.id == id }
-            }
-            let resolvedPending = pendingCount > 0 ? pendingCount : (progress.hasPendingItems ? max(1, pendingCount) : pendingCount)
-            return SmartCleanupResumeInfo(
-                lastCategory: progress.lastCategory,
-                anchorPhoto: anchorPhoto,
-                pendingDeletionCount: resolvedPending
-            )
-        } else if pendingCount > 0 {
-            return SmartCleanupResumeInfo(
-                lastCategory: .all,
-                anchorPhoto: nil,
-                pendingDeletionCount: pendingCount
-            )
+        guard
+            let progress = smartCleanupProgress,
+            let anchorId = progress.lastPhotoId,
+            let anchorPhoto = items.first(where: { $0.id == anchorId })
+        else {
+            return nil
         }
-        return nil
+
+        return SmartCleanupResumeInfo(
+            lastCategory: progress.lastCategory,
+            anchorPhoto: anchorPhoto,
+            pendingDeletionCount: pendingDeletionItems.count
+        )
     }
 
     // Dashboard Stats
@@ -685,6 +675,24 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         refreshSession()
     }
     
+    func resetSmartCleanupProgressOnly() {
+        storeSmartCleanupProgress(nil)
+    }
+
+    func resetTimeMachineProgress() {
+        timeMachineProgressStore.resetAll()
+        rebuildMonthStatuses(with: items)
+        if let context = activeMonthContext {
+            rebuildMonthSession(year: context.year, month: context.month)
+        } else {
+            refreshSession()
+        }
+    }
+
+    func timeMachineProgress(year: Int, month: Int) -> TimeMachineMonthProgress? {
+        timeMachineProgressStore.progress(year: year, month: month)
+    }
+    
     func photoItem(for asset: PHAsset, estimatedSize: Int) -> PhotoItem {
         if let existing = items.first(where: { $0.id == asset.localIdentifier }) {
             return existing
@@ -922,36 +930,23 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     }
 
     private func captureSmartCleanupAnchor() {
-        guard activeMonthContext == nil, isShowingCleaner else { return }
-        let hasPending = !pendingDeletionItems.isEmpty
-        let anchorId = currentItem?.id
-        if anchorId == nil, !hasPending {
-            storeSmartCleanupProgress(nil)
-            return
-        }
+        guard activeMonthContext == nil, isShowingCleaner, let anchorId = currentItem?.id else { return }
         var progress = smartCleanupProgress ?? SmartCleanupProgress(lastCategoryRawValue: currentFilter.rawValue)
         progress.lastCategoryRawValue = currentFilter.rawValue
         progress.lastPhotoId = anchorId
-        progress.hasPendingItems = hasPending
+        progress.hasPendingItems = !pendingDeletionItems.isEmpty
         progress.lastUpdatedAt = Date()
         storeSmartCleanupProgress(progress)
     }
 
     private func syncSmartCleanupPendingFlag() {
-        let hasPending = !pendingDeletionItems.isEmpty
-        if hasPending {
-            var progress = smartCleanupProgress ?? SmartCleanupProgress(lastCategoryRawValue: currentFilter.rawValue)
-            progress.hasPendingItems = true
-            progress.lastUpdatedAt = Date()
+        guard var progress = smartCleanupProgress else { return }
+        progress.hasPendingItems = !pendingDeletionItems.isEmpty
+        progress.lastUpdatedAt = Date()
+        if !progress.hasPendingItems && progress.lastPhotoId == nil {
+            storeSmartCleanupProgress(nil)
+        } else {
             storeSmartCleanupProgress(progress)
-        } else if var progress = smartCleanupProgress {
-            progress.hasPendingItems = false
-            progress.lastUpdatedAt = Date()
-            if progress.lastPhotoId == nil {
-                storeSmartCleanupProgress(nil)
-            } else {
-                storeSmartCleanupProgress(progress)
-            }
         }
     }
 
