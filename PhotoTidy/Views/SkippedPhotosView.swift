@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct SkippedPhotosView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
@@ -8,6 +11,7 @@ struct SkippedPhotosView: View {
     @State private var selection = Set<String>()
     @State private var showingClearAlert = false
     @State private var previewItem: PhotoItem?
+    @State private var shouldHideTabBar = true
     
     private let gridColumns = [
         GridItem(.flexible(), spacing: 12),
@@ -15,9 +19,18 @@ struct SkippedPhotosView: View {
         GridItem(.flexible(), spacing: 12)
     ]
     
+    private var bottomSafePadding: CGFloat {
+        #if canImport(UIKit)
+        let inset = UIApplication.pht_keyWindow?.safeAreaInsets.bottom ?? 0
+        return max(inset, 8)
+        #else
+        return 8
+        #endif
+    }
+    
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .bottom) {
+            ZStack {
                 Color(UIColor.systemGray6)
                     .ignoresSafeArea()
                 
@@ -83,15 +96,10 @@ struct SkippedPhotosView: View {
                                 }
                             }
                             
-                            Color.clear.frame(height: isSelecting ? 200 : 80)
+                            Color.clear.frame(height: 20)
                         }
                     }
                     .scrollIndicators(.hidden)
-                }
-                
-                if isSelecting {
-                    selectionActionBar
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
             .navigationBarHidden(true)
@@ -104,16 +112,22 @@ struct SkippedPhotosView: View {
             } message: {
                 Text("仅会移除跳过记录，并不会修改照片或待删区。")
             }
-            .toolbar(.hidden, for: .tabBar)
+            .safeAreaInset(edge: .bottom) {
+                selectionBarInset
+            }
+            .toolbar(shouldHideTabBar ? .hidden : .visible, for: .tabBar)
             .fullScreenCover(item: $previewItem) { item in
                 FullScreenPreviewView(item: item, viewModel: viewModel)
             }
         }
+        .onAppear { shouldHideTabBar = true }
+        .onDisappear { shouldHideTabBar = false }
     }
     
     private var header: some View {
         HStack {
             Button {
+                shouldHideTabBar = false
                 dismiss()
             } label: {
                 Image(systemName: "chevron.left")
@@ -164,7 +178,7 @@ struct SkippedPhotosView: View {
     
     
     private var selectionActionBar: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 8) {
             HStack {
                 Text(isSelecting ? "已选择 \(selection.count) 项" : "选择照片进行补处理")
                     .font(.system(size: 12, weight: .semibold))
@@ -212,11 +226,29 @@ struct SkippedPhotosView: View {
                 exitSelectionMode()
             }
         }
-        .padding(.vertical, 16)
-        .padding(.horizontal, 18)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .shadow(color: .black.opacity(0.15), radius: 20, y: 10)
+    }
+
+    @ViewBuilder
+    private var selectionBarInset: some View {
+        if isSelecting {
+            VStack(spacing: 0) {
+                selectionActionBar
+                    .padding(.top, 10)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, bottomSafePadding)
+            }
+            .frame(maxWidth: .infinity)
+            .background(.ultraThinMaterial)
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(Color.black.opacity(0.08))
+                    .frame(height: 0.5)
+            }
+            .ignoresSafeArea(edges: .bottom)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        } else {
+            Color.clear.frame(height: 0)
+        }
     }
     
     private func actionPill(title: String, icon: String, style: ActionStyle, isEnabled: Bool, action: @escaping () -> Void) -> some View {
@@ -227,7 +259,7 @@ struct SkippedPhotosView: View {
                     .font(.system(size: 13, weight: .semibold))
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
+            .padding(.vertical, 10)
             .foregroundColor(style == .destructive ? .white : .primary)
             .background(style == .destructive ? Color.red : Color(UIColor.systemGray6))
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -373,7 +405,9 @@ struct SkippedPhotosView: View {
     }
     
     private func enterSelectionMode(selectAll: Bool = false) {
-        isSelecting = true
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+            isSelecting = true
+        }
         if selectAll {
             selection = Set(filteredEntries.map { $0.record.photoId })
         } else {
@@ -382,7 +416,9 @@ struct SkippedPhotosView: View {
     }
     
     private func exitSelectionMode() {
-        isSelecting = false
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+            isSelecting = false
+        }
         selection.removeAll()
     }
     
@@ -491,3 +527,14 @@ private struct SkippedPhotoCell: View {
         return formatter.string(from: entry.record.timestamp)
     }
 }
+
+#if canImport(UIKit)
+private extension UIApplication {
+    static var pht_keyWindow: UIWindow? {
+        shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow }
+    }
+}
+#endif
