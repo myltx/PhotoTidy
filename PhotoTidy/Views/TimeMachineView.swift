@@ -35,7 +35,10 @@ struct TimeMachineView: View {
                                     ForEach(sections) { section in
                                         YearGroupView(
                                             section: section,
-                                            featuredMonthID: highlightedMonth?.id
+                                            featuredMonthID: highlightedMonth?.id,
+                                            onSelectMonth: { summary in
+                                                viewModel.showCleaner(forMonth: summary.year, month: summary.month)
+                                            }
                                         )
                                         .padding(.horizontal, 20)
                                     }
@@ -181,6 +184,7 @@ private struct TimeMachineHeader: View {
 private struct YearGroupView: View {
     let section: YearSection
     let featuredMonthID: String?
+    let onSelectMonth: (MonthSummary) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -194,7 +198,8 @@ private struct YearGroupView: View {
                 ForEach(section.months) { month in
                     MonthCard(
                         summary: month,
-                        isFeatured: month.id == featuredMonthID
+                        isFeatured: month.id == featuredMonthID,
+                        onTap: { onSelectMonth(month) }
                     )
                 }
             }
@@ -205,13 +210,26 @@ private struct YearGroupView: View {
 private struct MonthCard: View {
     let summary: MonthSummary
     let isFeatured: Bool
+    var onTap: (() -> Void)?
 
     var body: some View {
-        if isFeatured {
-            FeaturedMonthCard(summary: summary)
-        } else {
-            StandardMonthCard(summary: summary)
+        Group {
+            if isFeatured {
+                FeaturedMonthCard(summary: summary)
+            } else {
+                StandardMonthCard(summary: summary)
+            }
         }
+        .contentShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .onTapGesture {
+            guard canTriggerAction else { return }
+            onTap?()
+        }
+        .opacity(canTriggerAction ? 1 : 0.8)
+    }
+
+    private var canTriggerAction: Bool {
+        !summary.status.userCleaned || summary.isCurrentMonth
     }
 }
 

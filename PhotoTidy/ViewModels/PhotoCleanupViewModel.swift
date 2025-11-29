@@ -95,6 +95,19 @@ final class PhotoCleanupViewModel: ObservableObject {
         updateSessionItems(for: filter)
         isShowingCleaner = true
     }
+
+    func showCleaner(forMonth year: Int, month: Int) {
+        let calendar = Calendar.current
+        let notDeleted = items.filter { !$0.markedForDeletion }
+        sessionItems = notDeleted.filter { item in
+            guard let date = item.creationDate else { return false }
+            let comps = calendar.dateComponents([.year, .month], from: date)
+            return comps.year == year && comps.month == month
+        }
+        currentFilter = .all
+        currentIndex = 0
+        isShowingCleaner = true
+    }
     
     func hideCleaner() {
         isShowingCleaner = false
