@@ -9,8 +9,6 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     // Status
     @Published var authorizationStatus: PHAuthorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
     @Published var isLoading: Bool = false
-    @Published var isAnalyzing: Bool = false
-    @Published var analysisProgress: Double = 0
     @Published var selectedTheme: AppTheme = AppTheme(rawValue: UserDefaults.standard.string(forKey: "app_theme") ?? "") ?? .system {
         didSet {
             UserDefaults.standard.set(selectedTheme.rawValue, forKey: "app_theme")
@@ -125,7 +123,6 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         self.skippedPhotoRecords = skippedPhotoStore.allRecords()
         super.init()
         PHPhotoLibrary.shared().register(self)
-        refreshDeviceStorageUsage()
         if authorizationStatus == .authorized || authorizationStatus == .limited {
             loadAssets()
         }
@@ -134,7 +131,6 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             .publisher(for: UIApplication.willEnterForegroundNotification)
             .sink { [weak self] _ in
                 self?.updateAuthorizationStatus()
-                self?.refreshDeviceStorageUsage()
             }
     }
     
@@ -419,313 +415,157 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
 
     private func analyzeAllItemsInBackground() {
         guard !items.isEmpty else { return }
-        isAnalyzing = true
-        analysisProgress = 0
-
         let snapshotItems = self.items
         let cacheSnapshot = analysisCache.snapshot()
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
             var analyzedItems = snapshotItems
             let analysisService = ImageAnalysisService.shared
             let total = analyzedItems.count
             var featurePrints: [VNFeaturePrintObservation?] = Array(repeating: nil, count: total)
             var pHashes: [UInt64?] = Array(repeating: nil, count: total)
 
-            if !analyzedItems.isEmpty {
-                for i in 0..<analyzedItems.count {
-                    analyzedItems[i].similarGroupId = nil
-                    analyzedItems[i].similarityKind = nil
-                }
-            }
-
-            var indicesNeedingAnalysis: [Int] = []
-            for (index, item) in analyzedItems.enumerated() {
+            for i in 0..<total {
+                let item = analyzedItems[i]
+                analyzedItems[i].similarGroupId = nil
+                analyzedItems[i].similarityKind = nil
                 if let entry = cacheSnapshot[item.id],
                    entry.version == PhotoAnalysisCacheEntry.currentVersion,
                    entry.fileSize == item.fileSize {
-                    featurePrints[index] = self.unarchiveFeaturePrint(from: entry.featurePrintData)
-                    pHashes[index] = entry.pHash
-                    analyzedItems[index].isScreenshot = entry.isScreenshot
-                    analyzedItems[index].isDocumentLike = entry.isDocumentLike
-                    analyzedItems[index].isTextImage = entry.isTextImage
-                    analyzedItems[index].blurScore = entry.blurScore
-                    analyzedItems[index].isBlurredOrShaky = entry.isBlurredOrShaky
-                    analyzedItems[index].exposureIsBad = entry.exposureIsBad
-                    analyzedItems[index].pHash = entry.pHash
-                } else {
-                    indicesNeedingAnalysis.append(index)
-                }
-                analyzedItems[index].isLargeFile = item.fileSize > 15 * 1024 * 1024
-            }
-
-            var processedCount = total - indicesNeedingAnalysis.count
-            if total > 0 {
-                DispatchQueue.main.async {
-                    self.analysisProgress = Double(processedCount) / Double(total)
+                    featurePrints[i] = self.unarchiveFeaturePrint(from: entry.featurePrintData)
+                    pHashes[i] = entry.pHash
+                    analyzedItems[i].isScreenshot = entry.isScreenshot
+                    analyzedItems[i].isDocumentLike = entry.isDocumentLike
+                    analyzedItems[i].isTextImage = entry.isTextImage
+                    analyzedItems[i].blurScore = entry.blurScore
+                    analyzedItems[i].isBlurredOrShaky = entry.isBlurredOrShaky
+                    analyzedItems[i].exposureIsBad = entry.exposureIsBad
+                    analyzedItems[i].pHash = entry.pHash
                 }
             }
 
-            if !indicesNeedingAnalysis.isEmpty {
-                let requestOptions = PHImageRequestOptions()
-                requestOptions.isSynchronous = true
-                requestOptions.deliveryMode = .highQualityFormat
-                requestOptions.resizeMode = .exact
-                requestOptions.isNetworkAccessAllowed = true
-                let targetSize = CGSize(width: 256, height: 256)
+            let requestOptions = PHImageRequestOptions()
+            requestOptions.isSynchronous = true
+            requestOptions.deliveryMode = .highQualityFormat
+            requestOptions.resizeMode = .exact
+            requestOptions.isNetworkAccessAllowed = true
+            let targetSize = CGSize(width: 256, height: 256)
 
-                for (offset, index) in indicesNeedingAnalysis.enumerated() {
-                    autoreleasepool {
-                        var thumbnail: UIImage?
-                        let semaphore = DispatchSemaphore(value: 0)
-                        let asset = analyzedItems[index].asset
-                        self.imageManager.requestImage(
-                            for: asset,
-                            targetSize: targetSize,
-                            contentMode: .aspectFill,
-                            options: requestOptions
-                        ) { image, _ in
-                            thumbnail = image
-                            semaphore.signal()
-                        }
-                        semaphore.wait()
-
-                        if let image = thumbnail {
-                            let blurScore = analysisService.computeBlurScore(for: image) ?? 0
-                            let exposureBad = analysisService.isExposureBad(for: image)
-                            let isBlurred = blurScore < 0.04 || (blurScore < 0.07 && exposureBad)
-
-                            analyzedItems[index].blurScore = blurScore
-                            analyzedItems[index].exposureIsBad = exposureBad
-                            analyzedItems[index].isBlurredOrShaky = isBlurred
-
-                            let fileSize = analyzedItems[index].fileSize
-                            analyzedItems[index].isLargeFile = fileSize > 15 * 1024 * 1024
-
-                            if !analyzedItems[index].isVideo {
-                                let feature = analysisService.featurePrint(for: image)
-                                featurePrints[index] = feature
-                                let hash = analysisService.perceptualHash(for: image)
-                                pHashes[index] = hash
-                                analyzedItems[index].pHash = hash
-
-                                if #available(iOS 16.0, *), let cgImage = image.cgImage {
-                                    let type = AssetTypeDetector.shared.detectAssetTypeSync(asset: asset, image: cgImage)
-                                    analyzedItems[index].assetType = type
-                                    switch type {
-                                    case .screenshot:
-                                        analyzedItems[index].isScreenshot = true
-                                        analyzedItems[index].isDocumentLike = false
-                                        analyzedItems[index].isTextImage = false
-                                    case .document:
-                                        analyzedItems[index].isDocumentLike = true
-                                        analyzedItems[index].isTextImage = false
-                                    case .textImage:
-                                        analyzedItems[index].isTextImage = true
-                                    case .normalPhoto:
-                                        break
-                                    }
-                                } else if !analyzedItems[index].isScreenshot {
-                                    let isDoc = analysisService.isDocumentLike(image: image)
-                                    analyzedItems[index].isDocumentLike = isDoc
-                                }
-                            }
-                        } else {
-                            let fileSize = analyzedItems[index].fileSize
-                            analyzedItems[index].isLargeFile = fileSize > 15 * 1024 * 1024
-                        }
-
-                        processedCount += 1
-                        if offset % 15 == 0 || offset == indicesNeedingAnalysis.count - 1 {
-                            let progress = Double(processedCount) / Double(total)
-                            DispatchQueue.main.async {
-                                self.analysisProgress = progress
-                            }
-                        }
+            for index in 0..<analyzedItems.count {
+                if featurePrints[index] != nil { continue }
+                autoreleasepool {
+                    var thumbnail: UIImage?
+                    let semaphore = DispatchSemaphore(value: 0)
+                    let asset = analyzedItems[index].asset
+                    self.imageManager.requestImage(
+                        for: asset,
+                        targetSize: targetSize,
+                        contentMode: .aspectFill,
+                        options: requestOptions
+                    ) { image, _ in
+                        thumbnail = image
+                        semaphore.signal()
                     }
-                }
-            }
+                    semaphore.wait()
 
-            // MARK: - 相似分组
-            // 1) 粗分组：按时间窗口 + pHash 预筛选候选集合
-            let hasFeaturePrint = featurePrints.contains { $0 != nil }
-            if hasFeaturePrint {
-                // 按拍摄时间排序索引
-                let indices = Array(0..<total).sorted { lhs, rhs in
-                    let d1 = analyzedItems[lhs].creationDate ?? .distantPast
-                    let d2 = analyzedItems[rhs].creationDate ?? .distantPast
-                    return d1 < d2
-                }
-
-                // 时间窗口（秒），用于粗分组连拍
-                let timeWindow: TimeInterval = 3.0
-                var coarseBuckets: [[Int]] = []
-                var currentBucket: [Int] = []
-                var bucketStartDate: Date?
-
-                for idx in indices {
-                    guard let date = analyzedItems[idx].creationDate else { continue }
-                    if currentBucket.isEmpty {
-                        currentBucket = [idx]
-                        bucketStartDate = date
-                    } else if let start = bucketStartDate,
-                              date.timeIntervalSince(start) <= timeWindow {
-                        currentBucket.append(idx)
+                    if let image = thumbnail {
+                        let blurScore = analysisService.computeBlurScore(for: image) ?? 0
+                        let exposureBad = analysisService.isExposureBad(for: image)
+                        analyzedItems[index].blurScore = blurScore
+                        analyzedItems[index].exposureIsBad = exposureBad
+                        analyzedItems[index].isBlurredOrShaky = blurScore < 0.04 || (blurScore < 0.07 && exposureBad)
+                        analyzedItems[index].isLargeFile = analyzedItems[index].fileSize > 15 * 1024 * 1024
+                        if !analyzedItems[index].isVideo {
+                            featurePrints[index] = analysisService.featurePrint(for: image)
+                            let hash = analysisService.perceptualHash(for: image)
+                            pHashes[index] = hash
+                            analyzedItems[index].pHash = hash
+                        }
                     } else {
-                        if currentBucket.count > 1 {
-                            coarseBuckets.append(currentBucket)
-                        }
-                        currentBucket = [idx]
-                        bucketStartDate = date
-                    }
-                }
-                if currentBucket.count > 1 {
-                    coarseBuckets.append(currentBucket)
-                }
-
-                // 在每个时间桶内，用 pHash 做进一步粗筛（汉明距离 < 10）
-                var candidateGroups: [[Int]] = []
-                let pHashThreshold = 10
-
-                for bucket in coarseBuckets {
-                    var used = Set<Int>()
-                    for i in 0..<bucket.count {
-                        let idxI = bucket[i]
-                        if used.contains(idxI) { continue }
-                        guard let h1 = pHashes[idxI] else { continue }
-
-                        var group: [Int] = [idxI]
-                        used.insert(idxI)
-
-                        for j in (i + 1)..<bucket.count {
-                            let idxJ = bucket[j]
-                            if used.contains(idxJ) { continue }
-                            guard let h2 = pHashes[idxJ] else { continue }
-                            let distance = analysisService.hammingDistance(h1, h2)
-                            if distance < pHashThreshold {
-                                group.append(idxJ)
-                                used.insert(idxJ)
-                            }
-                        }
-
-                        if group.count > 1 {
-                            candidateGroups.append(group)
-                        }
-                    }
-                }
-
-                // 2) 精分组：在候选集合内用 Vision FeaturePrint 区分「重复」和「轻微差异」
-                var globalGroupId = 0
-                var assigned = Array(repeating: false, count: total)
-                let duplicateThreshold: Float = 10.0
-                let similarThreshold: Float = 25.0
-
-                func assignGroup(indices: [Int], kind: SimilarityGroupKind) {
-                    guard indices.count > 1 else { return }
-                    globalGroupId += 1
-                    for idx in indices {
-                        analyzedItems[idx].similarGroupId = globalGroupId
-                        analyzedItems[idx].similarityKind = kind
-                        assigned[idx] = true
-                    }
-                }
-
-                func clusterWithin(_ indices: [Int]) {
-                    let local = indices.filter { featurePrints[$0] != nil }
-                    guard !local.isEmpty else { return }
-
-                    // 2.1 先聚类“重复”（距离 < duplicateThreshold）
-                    for i in 0..<local.count {
-                        let idxI = local[i]
-                        if assigned[idxI] { continue }
-                        guard let fp1 = featurePrints[idxI] else { continue }
-
-                        var cluster: [Int] = [idxI]
-                        for j in (i + 1)..<local.count {
-                            let idxJ = local[j]
-                            if assigned[idxJ] { continue }
-                            guard let fp2 = featurePrints[idxJ] else { continue }
-                            if let distance = analysisService.distance(between: fp1, and: fp2),
-                               distance < duplicateThreshold {
-                                cluster.append(idxJ)
-                            }
-                        }
-
-                        if cluster.count > 1 {
-                            assignGroup(indices: cluster, kind: .duplicate)
-                        }
-                    }
-
-                    // 2.2 再聚类“轻微差异”（duplicateThreshold...similarThreshold）
-                    for i in 0..<local.count {
-                        let idxI = local[i]
-                        if assigned[idxI] { continue }
-                        guard let fp1 = featurePrints[idxI] else { continue }
-
-                        var cluster: [Int] = [idxI]
-                        for j in (i + 1)..<local.count {
-                            let idxJ = local[j]
-                            if assigned[idxJ] { continue }
-                            guard let fp2 = featurePrints[idxJ] else { continue }
-                            if let distance = analysisService.distance(between: fp1, and: fp2),
-                               distance < similarThreshold {
-                                cluster.append(idxJ)
-                            }
-                        }
-
-                        if cluster.count > 1 {
-                            assignGroup(indices: cluster, kind: .similar)
-                        }
-                    }
-                }
-
-                for group in candidateGroups {
-                    clusterWithin(group)
-                }
-            } else {
-                // Vision 特征全挂了：使用 (宽×高+文件大小) 粗略判定完全一样的照片
-                var groupsByKey: [String: [Int]] = [:]
-                for (index, item) in analyzedItems.enumerated() {
-                    guard !item.isVideo else { continue }
-                    let key = "\(Int(item.pixelSize.width))x\(Int(item.pixelSize.height))_\(item.fileSize)"
-                    groupsByKey[key, default: []].append(index)
-                }
-
-                var groupId = 0
-                for (_, indices) in groupsByKey {
-                    guard indices.count > 1 else { continue }
-                    groupId += 1
-                    for idx in indices {
-                        analyzedItems[idx].similarGroupId = groupId
-                        analyzedItems[idx].similarityKind = .duplicate
+                        analyzedItems[index].isLargeFile = analyzedItems[index].fileSize > 15 * 1024 * 1024
                     }
                 }
             }
+
+            self.processSimilarGroups(analyzedItems: &analyzedItems, featurePrints: featurePrints, pHashes: pHashes)
 
             let cacheEntries = self.buildCacheEntries(from: analyzedItems, featurePrints: featurePrints, pHashes: pHashes)
             self.analysisCache.update(entries: cacheEntries)
 
             DispatchQueue.main.async {
-                let latestItems = self.items
-                var deletionMap: [String: Bool] = [:]
-                for item in latestItems {
-                    deletionMap[item.id] = item.markedForDeletion
-                }
-                for i in 0..<analyzedItems.count {
-                    if let keepFlag = deletionMap[analyzedItems[i].id] {
-                        analyzedItems[i].markedForDeletion = keepFlag
-                    }
-                }
-
                 self.items = analyzedItems
-                self.isAnalyzing = false
-                self.hasTriggeredBackgroundAnalysis = false
+                self.revalidateSimilarGroups()
                 self.refreshSession()
+                self.hasTriggeredBackgroundAnalysis = false
             }
         }
     }
 
-    // MARK: - User Actions
+    private func processSimilarGroups(analyzedItems: inout [PhotoItem], featurePrints: [VNFeaturePrintObservation?], pHashes: [UInt64?]) {
+        let total = analyzedItems.count
+        guard total > 1 else { return }
+        let analysisService = ImageAnalysisService.shared
+        let indices = Array(0..<total).sorted { lhs, rhs in
+            let d1 = analyzedItems[lhs].creationDate ?? .distantPast
+            let d2 = analyzedItems[rhs].creationDate ?? .distantPast
+            return d1 < d2
+        }
+
+        let timeWindow: TimeInterval = 3.0
+        var buckets: [[Int]] = []
+        var current: [Int] = []
+        var bucketStart: Date?
+
+        for idx in indices {
+            guard let date = analyzedItems[idx].creationDate else { continue }
+            if current.isEmpty {
+                current = [idx]
+                bucketStart = date
+            } else if let start = bucketStart, date.timeIntervalSince(start) <= timeWindow {
+                current.append(idx)
+            } else {
+                if current.count > 1 { buckets.append(current) }
+                current = [idx]
+                bucketStart = date
+            }
+        }
+        if current.count > 1 { buckets.append(current) }
+
+        var globalGroupId = 0
+        let pHashThreshold = 10
+
+        for bucket in buckets {
+            var used = Set<Int>()
+            for i in 0..<bucket.count {
+                let idxI = bucket[i]
+                if used.contains(idxI) { continue }
+                guard let h1 = pHashes[idxI] else { continue }
+
+                var group: [Int] = [idxI]
+                used.insert(idxI)
+
+                for j in (i + 1)..<bucket.count {
+                    let idxJ = bucket[j]
+                    if used.contains(idxJ) { continue }
+                    guard let h2 = pHashes[idxJ] else { continue }
+                    let distance = analysisService.hammingDistance(h1, h2)
+                    if distance < pHashThreshold {
+                        group.append(idxJ)
+                        used.insert(idxJ)
+                    }
+                }
+
+                if group.count > 1 {
+                    globalGroupId += 1
+                    for idx in group {
+                        analyzedItems[idx].similarGroupId = globalGroupId
+                        analyzedItems[idx].similarityKind = .similar
+                    }
+                }
+            }
+        }
+    }
+// MARK: - User Actions
 
     func moveToNext() {
         guard !sessionItems.isEmpty else {

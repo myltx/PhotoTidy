@@ -501,8 +501,6 @@ private extension DashboardView {
     private var analysisStatusText: String? {
         if viewModel.isLoading {
             return "正在加载相册…"
-        } else if viewModel.isAnalyzing {
-            return "AI 正在分析中…"
         }
         return nil
     }

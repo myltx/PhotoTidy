@@ -8,18 +8,6 @@ struct CleanerContainerView: View {
         VStack(spacing: 0) {
             topBar
 
-            if viewModel.isAnalyzing {
-                HStack(spacing: 6) {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .scaleEffect(0.6)
-                    Text("AI 正在分析中…")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-                .padding(.bottom, 8)
-            }
-
             if viewModel.currentItem != nil {
                 VStack(spacing: 12) {
                     HStack {

@@ -431,21 +431,9 @@ struct SimilarComparisonView: View {
     private var emptyOrAnalyzingView: some View {
         VStack {
             Spacer()
-            if viewModel.isAnalyzing {
-                VStack(spacing: 12) {
-                    ProgressView(value: viewModel.analysisProgress)
-                        .progressViewStyle(.linear)
-                        .tint(Color("brand-start"))
-                        .padding(.horizontal, 40)
-                    Text("AI 正在识别相似照片…")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-            } else {
-                Text("没有检测到相似照片")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
+            Text("没有检测到相似照片")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
             Spacer()
         }
     }
