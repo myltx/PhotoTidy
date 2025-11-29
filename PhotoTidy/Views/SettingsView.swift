@@ -40,6 +40,8 @@ struct SettingsView: View {
                     AdvancedOperationsView(viewModel: viewModel)
                 case .permissions:
                     PermissionsView(viewModel: viewModel)
+                case .skipped:
+                    SkippedPhotosView(viewModel: viewModel)
                 }
             }
         }
@@ -51,6 +53,7 @@ private enum SettingsRoute: Hashable {
     case preferences
     case advanced
     case permissions
+    case skipped
 }
 
 private extension SettingsView {
@@ -200,9 +203,7 @@ private extension SettingsView {
                 .padding(.horizontal, 4)
             
             VStack(spacing: 0) {
-                NavigationLink {
-                    SkippedPhotosView(viewModel: viewModel)
-                } label: {
+                NavigationLink(value: SettingsRoute.skipped) {
                     HStack {
                         HStack(spacing: 10) {
                             dataIcon(background: Color.purple.opacity(0.12))

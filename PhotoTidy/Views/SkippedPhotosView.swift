@@ -11,7 +11,6 @@ struct SkippedPhotosView: View {
     @State private var selection = Set<String>()
     @State private var showingClearAlert = false
     @State private var previewItem: PhotoItem?
-    @State private var shouldHideTabBar = true
     
     private let gridColumns = [
         GridItem(.flexible(), spacing: 12),
@@ -29,62 +28,60 @@ struct SkippedPhotosView: View {
     }
     
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color(UIColor.systemGray6)
-                    .ignoresSafeArea()
+        ZStack {
+            Color(UIColor.systemGray6)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                header
+                    .padding(.horizontal, 24)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
+                    .background(.ultraThinMaterial)
                 
-                VStack(spacing: 0) {
-                    header
-                        .padding(.horizontal, 24)
-                        .padding(.top, 12)
-                        .padding(.bottom, 8)
-                        .background(.ultraThinMaterial)
-                    
-                    ScrollView {
-                        VStack(spacing: 18) {
-                            infoCard
-                                .padding(.horizontal, 24)
-                                .padding(.top, 8)
-                            
-                            filterBar
-                                .padding(.horizontal, 24)
-                            
-                            if groupedSections.isEmpty {
-                                emptyState
-                                    .padding(.top, 80)
-                                    .padding(.horizontal, 40)
-                            } else {
-                                ForEach(groupedSections) { section in
-                                    VStack(alignment: .leading, spacing: 12) {
-                                        HStack {
-                                            Text(section.title)
-                                                .font(.system(size: 14, weight: .bold))
-                                                .foregroundColor(.primary)
-                                            Spacer()
-                                        }
-                                        
-                                        VStack(alignment: .leading, spacing: 18) {
-                                            ForEach(section.sourceGroups) { group in
-                                                VStack(alignment: .leading, spacing: 8) {
-                                                    Text(group.displayTitle)
-                                                        .font(.system(size: 11, weight: .semibold))
-                                                        .foregroundColor(.secondary)
-                                                    LazyVGrid(columns: gridColumns, spacing: 12) {
-                                                        ForEach(group.entries) { entry in
-                                                            SkippedPhotoCell(
-                                                                entry: entry,
-                                                                isSelected: selection.contains(entry.record.photoId),
-                                                                isSelecting: isSelecting,
-                                                                viewModel: viewModel
-                                                            )
-                                                            .contentShape(Rectangle())
-                                                            .onTapGesture {
-                                                                if isSelecting {
-                                                                    toggleSelection(for: entry.record.photoId)
-                                                                } else if let photo = entry.photo {
-                                                                    previewItem = photo
-                                                                }
+                ScrollView {
+                    VStack(spacing: 18) {
+                        infoCard
+                            .padding(.horizontal, 24)
+                            .padding(.top, 8)
+                        
+                        filterBar
+                            .padding(.horizontal, 24)
+                        
+                        if groupedSections.isEmpty {
+                            emptyState
+                                .padding(.top, 80)
+                                .padding(.horizontal, 40)
+                        } else {
+                            ForEach(groupedSections) { section in
+                                VStack(alignment: .leading, spacing: 12) {
+                                    HStack {
+                                        Text(section.title)
+                                            .font(.system(size: 14, weight: .bold))
+                                            .foregroundColor(.primary)
+                                        Spacer()
+                                    }
+                                    
+                                    VStack(alignment: .leading, spacing: 18) {
+                                        ForEach(section.sourceGroups) { group in
+                                            VStack(alignment: .leading, spacing: 8) {
+                                                Text(group.displayTitle)
+                                                    .font(.system(size: 11, weight: .semibold))
+                                                    .foregroundColor(.secondary)
+                                                LazyVGrid(columns: gridColumns, spacing: 12) {
+                                                    ForEach(group.entries) { entry in
+                                                        SkippedPhotoCell(
+                                                            entry: entry,
+                                                            isSelected: selection.contains(entry.record.photoId),
+                                                            isSelecting: isSelecting,
+                                                            viewModel: viewModel
+                                                        )
+                                                        .contentShape(Rectangle())
+                                                        .onTapGesture {
+                                                            if isSelecting {
+                                                                toggleSelection(for: entry.record.photoId)
+                                                            } else if let photo = entry.photo {
+                                                                previewItem = photo
                                                             }
                                                         }
                                                     }
@@ -92,42 +89,38 @@ struct SkippedPhotosView: View {
                                             }
                                         }
                                     }
-                                    .padding(.horizontal, 24)
                                 }
+                                .padding(.horizontal, 24)
                             }
-                            
-                            Color.clear.frame(height: 20)
                         }
+                        
+                        Color.clear.frame(height: 20)
                     }
-                    .scrollIndicators(.hidden)
                 }
-            }
-            .navigationBarHidden(true)
-            .alert("清空全部跳过记录？", isPresented: $showingClearAlert) {
-                Button("取消", role: .cancel) {}
-                Button("清空", role: .destructive) {
-                    viewModel.clearSkippedRecords()
-                    selection.removeAll()
-                }
-            } message: {
-                Text("仅会移除跳过记录，并不会修改照片或待删区。")
-            }
-            .safeAreaInset(edge: .bottom) {
-                selectionBarInset
-            }
-            .toolbar(shouldHideTabBar ? .hidden : .visible, for: .tabBar)
-            .fullScreenCover(item: $previewItem) { item in
-                FullScreenPreviewView(item: item, viewModel: viewModel)
+                .scrollIndicators(.hidden)
             }
         }
-        .onAppear { shouldHideTabBar = true }
-        .onDisappear { shouldHideTabBar = false }
+        .alert("清空全部跳过记录？", isPresented: $showingClearAlert) {
+            Button("取消", role: .cancel) {}
+            Button("清空", role: .destructive) {
+                viewModel.clearSkippedRecords()
+                selection.removeAll()
+            }
+        } message: {
+            Text("仅会移除跳过记录，并不会修改照片或待删区。")
+        }
+        .safeAreaInset(edge: .bottom) {
+            selectionBarInset
+        }
+        .toolbar(.hidden, for: .tabBar)
+        .fullScreenCover(item: $previewItem) { item in
+            FullScreenPreviewView(item: item, viewModel: viewModel)
+        }
     }
     
     private var header: some View {
         HStack {
             Button {
-                shouldHideTabBar = false
                 dismiss()
             } label: {
                 Image(systemName: "chevron.left")
