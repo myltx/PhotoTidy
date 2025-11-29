@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PhotoTidy - Ultimate Master Design (v6.0)</title>
+    <title>PhotoTidy - Fixed Design System</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link
       rel="stylesheet"
@@ -15,8 +15,8 @@
           extend: {
             colors: {
               brand: {
-                from: "#60a5fa", // Blue 400
-                to: "#a78bfa", // Purple 400
+                from: "#60a5fa",
+                to: "#a78bfa",
                 primary: "#6366f1",
                 bg: "#f8fafc",
               },
@@ -24,7 +24,7 @@
             boxShadow: {
               phone:
                 "0 50px 100px -20px rgba(50, 50, 93, 0.25), 0 30px 60px -30px rgba(0, 0, 0, 0.3)",
-              float: "0 20px 40px -10px rgba(96, 165, 250, 0.25)",
+              float: "0 20px 40px -10px rgba(99, 102, 241, 0.2)",
               card: "0 10px 20px -5px rgba(0, 0, 0, 0.03)",
               glass: "0 8px 32px 0 rgba(31, 38, 135, 0.37)",
             },
@@ -84,7 +84,7 @@
         white-space: nowrap;
       }
 
-      /* Logo & Icons */
+      /* Logo Styles */
       .logo-box {
         position: relative;
         width: 100%;
@@ -129,18 +129,17 @@
         -webkit-text-fill-color: transparent;
       }
 
-      /* Settings List Styles */
-      .settings-group {
-        @apply bg-white rounded-xl overflow-hidden mb-6 mx-0 shadow-sm border border-gray-100;
+      /* Toggle Switch Logic (Standard CSS) */
+      .toggle-checkbox:checked {
+        right: 0;
+        border-color: #6366f1;
       }
-      .settings-item {
-        @apply flex items-center justify-between p-4 border-b border-gray-50 last:border-0 active:bg-gray-50 transition-colors cursor-pointer;
+      .toggle-checkbox:checked + .toggle-label {
+        background-color: #6366f1;
       }
-      .settings-icon {
-        @apply w-7 h-7 rounded-md flex items-center justify-center text-sm mr-3;
-      }
-      .section-title {
-        @apply px-2 mb-2 text-xs font-medium text-gray-400 uppercase tracking-wider mt-6;
+      .toggle-checkbox:checked + .toggle-label > div {
+        transform: translateX(100%);
+        border-color: white;
       }
     </style>
   </head>
@@ -196,6 +195,8 @@
               <img
                 src="https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?w=600&q=80"
                 class="absolute inset-0 w-full h-full object-cover opacity-60" />
+              <div
+                class="absolute inset-0 bg-gradient-to-t from-gray-900 via-transparent to-transparent"></div>
               <div class="absolute bottom-6 left-6 text-white">
                 <div
                   class="bg-indigo-500/90 backdrop-blur px-3 py-1 rounded-full text-[10px] font-bold w-fit mb-2">
@@ -296,6 +297,8 @@
               <img
                 src="https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?w=600&q=80"
                 class="absolute inset-0 w-full h-full object-cover opacity-50 mix-blend-overlay" />
+              <div
+                class="absolute inset-0 bg-gradient-to-t from-gray-900 via-[#1e1b4b]/60 to-transparent"></div>
               <div class="absolute bottom-6 left-6 right-6 text-white z-10">
                 <div class="flex justify-between items-start mb-2">
                   <div
@@ -314,7 +317,11 @@
                   </div>
                 </div>
                 <h2 class="text-2xl font-bold mb-1 tracking-tight">继续整理</h2>
-                <div class="flex items-center gap-3 mt-4">
+                <p class="text-indigo-200 text-xs mb-4 flex items-center gap-1">
+                  <i class="fa-solid fa-clock-rotate-left"></i> 上次停留：2023年
+                  10月12日
+                </p>
+                <div class="flex items-center gap-3">
                   <button
                     class="flex-1 bg-white text-indigo-900 px-4 py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-transform">
                     <i class="fa-solid fa-play"></i> 继续</button
@@ -353,7 +360,7 @@
           </div>
           <div
             class="absolute bottom-0 w-full h-20 glass-nav flex justify-around items-center pb-2">
-            <i class="fa-solid fa-house text-indigo-600 text-xl"></i
+            <i class="fa-solid fa-house text-indigo-500 text-xl"></i
             ><i class="fa-solid fa-clock-rotate-left text-gray-400 text-xl"></i
             ><i class="fa-solid fa-gear text-gray-400 text-xl"></i>
           </div>
@@ -382,7 +389,7 @@
               <h3 class="text-sm font-bold text-gray-400 mb-3 px-1">2025</h3>
               <div class="space-y-4">
                 <div
-                  class="w-full bg-gradient-to-r from-brand-from to-brand-to rounded-3xl p-5 text-white shadow-float relative overflow-hidden group cursor-pointer">
+                  class="w-full bg-gradient-to-r from-brand-from to-brand-to rounded-3xl p-5 text-white shadow-float relative overflow-hidden group cursor-pointer active:scale-[0.98] transition-transform">
                   <div
                     class="absolute top-0 right-0 w-32 h-32 bg-white opacity-10 rounded-full blur-2xl -translate-y-8 translate-x-8 pointer-events-none"></div>
                   <div
@@ -414,9 +421,13 @@
                     <div class="w-[30%] bg-green-300 rounded-full"></div>
                     <div class="w-[50%] bg-white/30 rounded-full"></div>
                   </div>
+                  <div
+                    class="flex justify-between mt-2 text-[10px] font-medium opacity-70">
+                    <span>相似/截图/模糊</span><span>良好照片</span>
+                  </div>
                 </div>
                 <div
-                  class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex justify-between items-center">
+                  class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex justify-between items-center active:scale-[0.98] transition-transform cursor-pointer">
                   <div class="flex items-center gap-4">
                     <div
                       class="w-12 h-12 rounded-xl bg-green-50 text-green-600 flex flex-col items-center justify-center border border-green-100">
@@ -442,7 +453,7 @@
             class="absolute bottom-0 w-full h-20 glass-nav flex justify-around items-center pb-2">
             <i class="fa-solid fa-house text-gray-400 text-xl"></i
             ><i
-              class="fa-solid fa-clock-rotate-left text-indigo-600 text-xl"></i
+              class="fa-solid fa-clock-rotate-left text-indigo-500 text-xl"></i
             ><i class="fa-solid fa-gear text-gray-400 text-xl"></i>
           </div>
         </div>
@@ -547,7 +558,7 @@
                 </div>
               </div>
               <div
-                class="w-12 h-full rounded-xl overflow-hidden border-2 border-indigo-600 shadow-lg -translate-y-1">
+                class="w-12 h-full rounded-xl overflow-hidden border-2 border-indigo-500 shadow-lg -translate-y-1">
                 <img
                   src="https://images.unsplash.com/photo-1543852786-1cf6624b9987?w=200&q=80"
                   class="img-cover" />
@@ -596,7 +607,7 @@
                 src="https://images.unsplash.com/photo-1495147466023-ac5c588e2e94?w=400&q=80"
                 class="img-cover blur-[2px]" />
               <div
-                class="absolute top-2 right-2 w-6 h-6 bg-indigo-600 rounded-full flex items-center justify-center text-white text-[10px]">
+                class="absolute top-2 right-2 w-6 h-6 bg-indigo-500 rounded-full flex items-center justify-center text-white text-[10px]">
                 <i class="fa-solid fa-check"></i>
               </div>
               <div
@@ -609,13 +620,25 @@
                 src="https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=400&q=80"
                 class="img-cover blur-[1px] brightness-50" />
               <div
-                class="absolute top-2 right-2 w-6 h-6 bg-indigo-600 rounded-full flex items-center justify-center text-white text-[10px]">
+                class="absolute top-2 right-2 w-6 h-6 bg-indigo-500 rounded-full flex items-center justify-center text-white text-[10px]">
                 <i class="fa-solid fa-check"></i>
               </div>
               <div
                 class="absolute bottom-2 left-2 bg-gray-800/80 backdrop-blur px-2 py-0.5 rounded text-[10px] text-white">
                 曝光不足
               </div>
+            </div>
+            <div
+              class="relative aspect-square rounded-2xl overflow-hidden opacity-50">
+              <img
+                src="https://images.unsplash.com/photo-1453227588063-bb30fd97476f?w=400&q=80"
+                class="img-cover" />
+            </div>
+            <div
+              class="relative aspect-square rounded-2xl overflow-hidden opacity-50">
+              <img
+                src="https://images.unsplash.com/photo-1605092676920-8ac5ae40c7c8?w=400&q=80"
+                class="img-cover" />
             </div>
           </div>
           <div class="p-6 border-t border-gray-100">
@@ -799,7 +822,7 @@
       </div>
 
       <div class="relative">
-        <div class="page-label text-indigo-600">10. 设置主页 (一级)</div>
+        <div class="page-label text-indigo-600">10. 设置 (一级)</div>
         <div class="phone-frame bg-gray-50">
           <div class="px-5 pt-14 pb-24 h-full overflow-y-auto no-scrollbar">
             <div class="flex justify-between items-center mb-6 px-2">
@@ -832,11 +855,17 @@
                 </button>
               </div>
             </div>
-            <div class="section-title">常用工具</div>
-            <div class="settings-group">
-              <div class="settings-item">
+            <div
+              class="px-2 mb-2 text-xs font-medium text-gray-400 uppercase tracking-wider mt-6">
+              常用工具
+            </div>
+            <div
+              class="bg-white rounded-xl overflow-hidden mb-6 mx-0 shadow-sm border border-gray-100">
+              <div
+                class="flex items-center justify-between p-4 border-b border-gray-50 last:border-0 active:bg-gray-50 transition-colors cursor-pointer">
                 <div class="flex items-center">
-                  <div class="settings-icon bg-purple-500 text-white">
+                  <div
+                    class="w-7 h-7 rounded-md flex items-center justify-center text-sm mr-3 bg-purple-500 text-white">
                     <i class="fa-solid fa-arrow-rotate-left"></i>
                   </div>
                   <span class="text-sm font-medium text-gray-900"
@@ -851,9 +880,11 @@
                     class="fa-solid fa-chevron-right text-xs text-gray-300"></i>
                 </div>
               </div>
-              <div class="settings-item">
+              <div
+                class="flex items-center justify-between p-4 border-b border-gray-50 last:border-0 active:bg-gray-50 transition-colors cursor-pointer">
                 <div class="flex items-center">
-                  <div class="settings-icon bg-orange-500 text-white">
+                  <div
+                    class="w-7 h-7 rounded-md flex items-center justify-center text-sm mr-3 bg-orange-500 text-white">
                     <i class="fa-solid fa-broom"></i>
                   </div>
                   <span class="text-sm font-medium text-gray-900"
@@ -861,9 +892,11 @@
                   >
                 </div>
               </div>
-              <div class="settings-item">
+              <div
+                class="flex items-center justify-between p-4 border-b border-gray-50 last:border-0 active:bg-gray-50 transition-colors cursor-pointer">
                 <div class="flex items-center">
-                  <div class="settings-icon bg-gray-500 text-white">
+                  <div
+                    class="w-7 h-7 rounded-md flex items-center justify-center text-sm mr-3 bg-gray-500 text-white">
                     <i class="fa-solid fa-rotate-right"></i>
                   </div>
                   <span class="text-sm font-medium text-gray-900"
@@ -872,11 +905,17 @@
                 </div>
               </div>
             </div>
-            <div class="section-title">配置</div>
-            <div class="settings-group">
-              <div class="settings-item">
+            <div
+              class="px-2 mb-2 text-xs font-medium text-gray-400 uppercase tracking-wider mt-6">
+              配置
+            </div>
+            <div
+              class="bg-white rounded-xl overflow-hidden mb-6 mx-0 shadow-sm border border-gray-100">
+              <div
+                class="flex items-center justify-between p-4 border-b border-gray-50 last:border-0 active:bg-gray-50 transition-colors cursor-pointer">
                 <div class="flex items-center">
-                  <div class="settings-icon bg-blue-500 text-white">
+                  <div
+                    class="w-7 h-7 rounded-md flex items-center justify-center text-sm mr-3 bg-blue-500 text-white">
                     <i class="fa-solid fa-sliders"></i>
                   </div>
                   <span class="text-sm font-medium text-gray-900"
@@ -885,9 +924,11 @@
                 </div>
                 <i class="fa-solid fa-chevron-right text-xs text-gray-300"></i>
               </div>
-              <div class="settings-item">
+              <div
+                class="flex items-center justify-between p-4 border-b border-gray-50 last:border-0 active:bg-gray-50 transition-colors cursor-pointer">
                 <div class="flex items-center">
-                  <div class="settings-icon bg-green-500 text-white">
+                  <div
+                    class="w-7 h-7 rounded-md flex items-center justify-center text-sm mr-3 bg-green-500 text-white">
                     <i class="fa-solid fa-shield-halved"></i>
                   </div>
                   <span class="text-sm font-medium text-gray-900"
@@ -897,11 +938,17 @@
                 <i class="fa-solid fa-chevron-right text-xs text-gray-300"></i>
               </div>
             </div>
-            <div class="section-title">支持</div>
-            <div class="settings-group">
-              <div class="settings-item">
+            <div
+              class="px-2 mb-2 text-xs font-medium text-gray-400 uppercase tracking-wider mt-6">
+              支持
+            </div>
+            <div
+              class="bg-white rounded-xl overflow-hidden mb-6 mx-0 shadow-sm border border-gray-100">
+              <div
+                class="flex items-center justify-between p-4 border-b border-gray-50 last:border-0 active:bg-gray-50 transition-colors cursor-pointer">
                 <div class="flex items-center">
-                  <div class="settings-icon bg-indigo-500 text-white">
+                  <div
+                    class="w-7 h-7 rounded-md flex items-center justify-center text-sm mr-3 bg-indigo-500 text-white">
                     <i class="fa-solid fa-circle-question"></i>
                   </div>
                   <span class="text-sm font-medium text-gray-900"
@@ -936,31 +983,44 @@
             </h1>
           </div>
           <div class="flex-1 overflow-y-auto no-scrollbar pt-6">
-            <div class="section-title mt-0">清理逻辑</div>
-            <div class="settings-group">
-              <div class="settings-item">
+            <div
+              class="px-2 mb-2 text-xs font-medium text-gray-400 uppercase tracking-wider mt-6">
+              清理逻辑
+            </div>
+            <div
+              class="bg-white rounded-xl overflow-hidden mb-6 mx-0 shadow-sm border border-gray-100">
+              <div
+                class="flex items-center justify-between p-4 border-b border-gray-50 last:border-0">
                 <span class="text-sm font-medium text-gray-900"
                   >忽略收藏照片</span
                 ><label class="relative inline-flex items-center cursor-pointer"
-                  ><input type="checkbox" checked class="sr-only peer" />
+                  ><input
+                    type="checkbox"
+                    checked
+                    class="sr-only peer toggle-checkbox" />
                   <div
-                    class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:bg-green-500 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div
+                    class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all toggle-label"></div
                 ></label>
               </div>
-              <div class="settings-item">
+              <div
+                class="flex items-center justify-between p-4 border-b border-gray-50 last:border-0">
                 <span class="text-sm font-medium text-gray-900">删除前确认</span
                 ><label class="relative inline-flex items-center cursor-pointer"
-                  ><input type="checkbox" checked class="sr-only peer" />
+                  ><input
+                    type="checkbox"
+                    checked
+                    class="sr-only peer toggle-checkbox" />
                   <div
-                    class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:bg-green-500 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div
+                    class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all toggle-label"></div
                 ></label>
               </div>
             </div>
-            <p class="px-4 text-[10px] text-gray-400 mb-6">
-              开启后，系统相册中标记为“喜欢”的照片将不会出现在清理列表中。
-            </p>
-            <div class="section-title">外观</div>
-            <div class="settings-group">
+            <div
+              class="px-2 mb-2 text-xs font-medium text-gray-400 uppercase tracking-wider mt-6">
+              外观
+            </div>
+            <div
+              class="bg-white rounded-xl overflow-hidden mb-6 mx-0 shadow-sm border border-gray-100">
               <div class="p-4">
                 <div class="flex justify-between items-center mb-4">
                   <span class="text-sm font-medium text-gray-900"
@@ -1037,6 +1097,16 @@
               </div>
               <h1 class="text-3xl font-bold mb-2">清理完成!</h1>
               <p class="text-indigo-200 mb-12 text-sm">相册现在整洁如新</p>
+              <div
+                class="bg-white/10 backdrop-blur-md rounded-3xl p-8 border border-white/20 mb-8 mx-4">
+                <div
+                  class="text-xs text-indigo-200 uppercase tracking-widest mb-2">
+                  本次释放空间
+                </div>
+                <div class="text-6xl font-bold tracking-tighter">
+                  1.8 <span class="text-2xl font-medium">GB</span>
+                </div>
+              </div>
               <button
                 class="w-full py-4 bg-white text-indigo-500 font-bold rounded-2xl shadow-lg">
                 返回首页
