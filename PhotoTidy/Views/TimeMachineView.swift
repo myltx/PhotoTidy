@@ -11,7 +11,7 @@ struct TimeMachineView: View {
     private var highlightedMonth: MonthSummary? {
         sections
             .flatMap { $0.months }
-            .first { $0.pendingCount > 0 } ?? sections.first?.months.first
+            .first { $0.status.needsAttention || $0.isCurrentMonth } ?? sections.first?.months.first
     }
 
     var body: some View {
@@ -103,13 +103,6 @@ private extension TimeMachineView {
             return "\(comps.year ?? 0)-\(comps.month ?? 0)"
         }
 
-        let pendingMap = viewModel.pendingDeletionItems.reduce(into: [String: Int]()) { acc, item in
-            let date = item.creationDate ?? Date()
-            let comps = Calendar.current.dateComponents([.year, .month], from: date)
-            let key = "\(comps.year ?? 0)-\(comps.month ?? 0)"
-            acc[key, default: 0] += 1
-        }
-
         let summaries = grouped.compactMap { (key, value) -> MonthSummary? in
             let parts = key.split(separator: "-")
             guard parts.count == 2,
@@ -121,14 +114,18 @@ private extension TimeMachineView {
             let monthDate = Calendar.current.date(from: DateComponents(year: year, month: month)) ?? Date()
             let sorted = value.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
 
+            let status = viewModel.monthStatuses[key] ?? viewModel.computeMonthStatus(photos: value)
+            let isCurrentMonth = Calendar.current.isDate(monthDate, equalTo: Date(), toGranularity: .month)
+
             return MonthSummary(
                 id: key,
                 year: year,
                 month: month,
                 monthTitle: formatterCN.string(from: monthDate),
                 englishTitle: formatterEN.string(from: monthDate),
-                totalCount: value.count,
-                pendingCount: pendingMap[key, default: 0],
+                totalCount: status.totalPhotos,
+                status: status,
+                isCurrentMonth: isCurrentMonth,
                 sampleItems: Array(sorted.prefix(2))
             )
         }
@@ -246,9 +243,15 @@ private struct MonthBadge: View {
 private struct FeaturedMonthCard: View {
     let summary: MonthSummary
 
+    private var status: MonthStatus { summary.status }
+
     private var metrics: [TimelineMetric] {
-        let total = max(Double(summary.totalCount), 1)
-        let pending = min(Double(summary.pendingCount), total)
+        if status.userCleaned {
+            return [TimelineMetric(color: Color.green.opacity(0.85), ratio: 1)]
+        }
+
+        let total = max(Double(status.totalPhotos), 1)
+        let pending = min(Double(status.predictedPendingCount), total)
         let remaining = max(total - pending, 0)
         let review = remaining * 0.4
         let good = max(remaining - review, 0)
@@ -263,11 +266,6 @@ private struct FeaturedMonthCard: View {
             return [TimelineMetric(color: Color.white.opacity(0.2), ratio: 1)]
         }
         return computed
-    }
-
-    private var isCurrentMonth: Bool {
-        let comps = Calendar.current.dateComponents([.year, .month], from: Date())
-        return comps.year == summary.year && comps.month == summary.month
     }
 
     var body: some View {
@@ -292,7 +290,7 @@ private struct FeaturedMonthCard: View {
                         HStack(spacing: 8) {
                             Text(summary.monthTitle)
                                 .font(.system(size: 32, weight: .bold))
-                            if isCurrentMonth {
+                            if summary.isCurrentMonth {
                                 Text("Current")
                                     .font(.system(size: 10, weight: .bold))
                                     .padding(.horizontal, 8)
@@ -310,36 +308,51 @@ private struct FeaturedMonthCard: View {
 
                     Spacer()
 
-                    VStack(alignment: .trailing, spacing: 2) {
-                        HStack(spacing: 4) {
-                            Text("\(summary.pendingCount)")
-                                .font(.system(size: 24, weight: .bold))
-                                .foregroundColor(.yellow)
-                            Text("待清理")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.9))
+                    if status.userCleaned {
+                        HStack(spacing: 6) {
+                            Text("已清理")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.white)
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.white)
+                                .font(.system(size: 14, weight: .bold))
                         }
-                        Text("查看详情")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.white.opacity(0.7))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.white.opacity(0.18))
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    } else {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            HStack(spacing: 4) {
+                                Text("\(status.predictedPendingCount)")
+                                    .font(.system(size: 24, weight: .bold))
+                                    .foregroundColor(.yellow)
+                                Text("待清理")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundColor(.white.opacity(0.9))
+                            }
+                            Text("查看详情")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(Color.white.opacity(0.18))
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                        )
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(Color.white.opacity(0.18))
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                    )
                 }
 
                 MultiSegmentProgressBar(segments: metrics)
                     .frame(height: 6)
 
                 HStack {
-                    Text("相似 / 截图 / 模糊")
+                    Text(status.userCleaned ? "整理完成" : "相似 / 截图 / 模糊")
                     Spacer()
-                    Text("良好照片")
+                    Text(status.userCleaned ? "等待新照片" : "良好照片")
                 }
                 .font(.system(size: 10, weight: .medium))
                 .foregroundColor(.white.opacity(0.75))
@@ -352,14 +365,18 @@ private struct FeaturedMonthCard: View {
 private struct StandardMonthCard: View {
     let summary: MonthSummary
 
-    private var hasPending: Bool { summary.pendingCount > 0 }
+    private var status: MonthStatus { summary.status }
+
+    private var shouldShowPending: Bool {
+        !status.userCleaned && (status.predictedPendingCount > 0 || summary.isCurrentMonth)
+    }
 
     var body: some View {
         HStack(spacing: 16) {
             MonthBadge(
                 month: summary.month,
                 englishTitle: summary.englishTitle,
-                highlighted: hasPending
+                highlighted: shouldShowPending
             )
 
             VStack(alignment: .leading, spacing: 4) {
@@ -373,21 +390,29 @@ private struct StandardMonthCard: View {
 
             Spacer()
 
-            if hasPending {
+            if shouldShowPending {
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text("\(summary.pendingCount)")
+                    Text("\(status.predictedPendingCount)")
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(.primary)
-                    Text("待删")
+                    Text("待处理")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(Color("brand-start"))
                 }
                 .padding(.trailing, 4)
+            } else if status.userCleaned {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14, weight: .bold))
+                    Text("已清理")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundColor(Color("brand-start"))
             } else {
                 HStack(spacing: 6) {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .bold))
-                    Text("已整理")
+                    Image(systemName: "hand.thumbsup")
+                        .font(.system(size: 12, weight: .bold))
+                    Text("状态良好")
                         .font(.system(size: 10, weight: .bold))
                 }
                 .padding(.horizontal, 10)
@@ -445,7 +470,8 @@ private struct MonthSummary: Identifiable {
     let monthTitle: String
     let englishTitle: String
     let totalCount: Int
-    let pendingCount: Int
+    let status: MonthStatus
+    let isCurrentMonth: Bool
     let sampleItems: [PhotoItem]
 }
 

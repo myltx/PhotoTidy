@@ -18,11 +18,16 @@ final class PhotoCleanupViewModel: ObservableObject {
     }
 
     // Data
-    @Published var items: [PhotoItem] = []
+    @Published var items: [PhotoItem] = [] {
+        didSet {
+            rebuildMonthStatuses(with: items)
+        }
+    }
     @Published var sessionItems: [PhotoItem] = []
     @Published var lastFreedSpace: Int = 0
     @Published var lastDeletedItemsCount: Int = 0
     @Published var deviceStorageUsage: DeviceStorageUsage = .empty
+    @Published private(set) var monthStatuses: [String: MonthStatus] = [:]
     
     // Navigation & Session State
     @Published var currentTab: AppView = .dashboard
@@ -570,6 +575,64 @@ final class PhotoCleanupViewModel: ObservableObject {
                 self.deviceStorageUsage = usage
             }
         }
+    }
+
+    // MARK: - Month Status Tracking
+
+    func markMonth(year: Int, month: Int, asCleaned cleaned: Bool) {
+        let key = monthKey(year: year, month: month)
+        guard var status = monthStatuses[key] else { return }
+        status.userCleaned = cleaned
+        monthStatuses[key] = status
+    }
+
+    func computeMonthStatus(photos: [PhotoItem]) -> MonthStatus {
+        guard !photos.isEmpty else {
+            return MonthStatus(totalPhotos: 0, predictedPendingCount: 0, userCleaned: false)
+        }
+
+        let predicted = photos.reduce(into: 0) { partialResult, item in
+            if shouldFlagForCleanup(item) {
+                partialResult += 1
+            }
+        }
+
+        return MonthStatus(
+            totalPhotos: photos.count,
+            predictedPendingCount: predicted,
+            userCleaned: false
+        )
+    }
+
+    private func rebuildMonthStatuses(with items: [PhotoItem]) {
+        let grouped = Dictionary(grouping: items) { (item: PhotoItem) -> String in
+            let date = item.creationDate ?? Date()
+            let comps = Calendar.current.dateComponents([.year, .month], from: date)
+            return monthKey(year: comps.year ?? 0, month: comps.month ?? 0)
+        }
+
+        var updated: [String: MonthStatus] = [:]
+        for (key, photos) in grouped {
+            var status = computeMonthStatus(photos: photos)
+            if let existing = monthStatuses[key] {
+                status.userCleaned = existing.userCleaned
+            }
+            updated[key] = status
+        }
+
+        monthStatuses = updated
+    }
+
+    private func shouldFlagForCleanup(_ item: PhotoItem) -> Bool {
+        if item.similarGroupId != nil { return true }
+        if item.isScreenshot || item.isDocumentLike || item.isTextImage { return true }
+        if item.isBlurredOrShaky { return true }
+        if item.isLargeFile && !item.isVideo { return true }
+        return false
+    }
+
+    private func monthKey(year: Int, month: Int) -> String {
+        "\(year)-\(month)"
     }
 }
 
