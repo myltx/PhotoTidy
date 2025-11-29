@@ -157,7 +157,7 @@ private struct PhotoCardViewWrapper: View {
             }
         } else if translation.height < -verticalThreshold {
             // 上滑：跳过
-            viewModel.moveToNext()
+            viewModel.skipCurrent()
         }
 
         withAnimation(.spring()) {

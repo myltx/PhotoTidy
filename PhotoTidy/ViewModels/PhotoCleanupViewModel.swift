@@ -37,9 +37,11 @@ final class PhotoCleanupViewModel: ObservableObject {
     
     @Published var currentFilter: CleanupFilterMode = .all
     @Published var currentIndex: Int = 0
+    private var activeMonthContext: (year: Int, month: Int)?
 
     // Services
     let imageManager = PHCachingImageManager()
+    private let progressStore: CleanupProgressStore
     private var cancellable: AnyCancellable?
 
     // MARK: - Computed Properties
@@ -61,7 +63,8 @@ final class PhotoCleanupViewModel: ObservableObject {
 
     // MARK: - Initialization
     
-    init() {
+    init(progressStore: CleanupProgressStore = .shared) {
+        self.progressStore = progressStore
         refreshDeviceStorageUsage()
         if authorizationStatus == .authorized || authorizationStatus == .limited {
             loadAssets()
@@ -92,25 +95,20 @@ final class PhotoCleanupViewModel: ObservableObject {
     // MARK: - Navigation
     
     func showCleaner(filter: CleanupFilterMode) {
+        activeMonthContext = nil
         updateSessionItems(for: filter)
         isShowingCleaner = true
     }
 
     func showCleaner(forMonth year: Int, month: Int) {
-        let calendar = Calendar.current
-        let notDeleted = items.filter { !$0.markedForDeletion }
-        sessionItems = notDeleted.filter { item in
-            guard let date = item.creationDate else { return false }
-            let comps = calendar.dateComponents([.year, .month], from: date)
-            return comps.year == year && comps.month == month
-        }
-        currentFilter = .all
-        currentIndex = 0
+        activeMonthContext = (year, month)
+        rebuildMonthSession(year: year, month: month)
         isShowingCleaner = true
     }
     
     func hideCleaner() {
         isShowingCleaner = false
+        activeMonthContext = nil
     }
 
     func showDetail(_ detail: DashboardDetail) {
@@ -140,7 +138,11 @@ final class PhotoCleanupViewModel: ObservableObject {
     }
 
     func refreshSession() {
-        updateSessionItems(for: self.currentFilter)
+        if let context = activeMonthContext {
+            rebuildMonthSession(year: context.year, month: context.month)
+        } else {
+            updateSessionItems(for: self.currentFilter)
+        }
     }
 
     // MARK: - Data Loading & Analysis
@@ -194,7 +196,9 @@ final class PhotoCleanupViewModel: ObservableObject {
             }
             
             DispatchQueue.main.async {
-                self.items = loadedItems
+                var restoredItems = loadedItems
+                self.restoreSelectionStates(in: &restoredItems)
+                self.items = restoredItems
                 self.isLoading = false
                 self.updateSessionItems(for: .all)
                 self.analyzeAllItemsInBackground()
@@ -480,30 +484,47 @@ final class PhotoCleanupViewModel: ObservableObject {
     // MARK: - User Actions
 
     func moveToNext() {
+        guard !sessionItems.isEmpty else {
+            updateMonthProgressIfNeeded(newValue: 0)
+            return
+        }
+
         if currentIndex < sessionItems.count - 1 {
             currentIndex += 1
         } else {
-            // Handle end of stack
             currentIndex = sessionItems.count
         }
+
+        updateMonthProgressIfNeeded(newValue: currentIndex)
     }
 
     func markCurrentForDeletion() {
         guard let currentItem = currentItem else { return }
         if let index = items.firstIndex(where: { $0.id == currentItem.id }) {
             items[index].markedForDeletion = true
+            persistSelectionState(for: items[index])
         }
         moveToNext()
     }
 
     func keepCurrent() {
-        // No change needed, just move to the next item
+        if let currentItem = currentItem {
+            recordSkip(for: currentItem)
+        }
+        moveToNext()
+    }
+    
+    func skipCurrent() {
+        if let currentItem = currentItem {
+            recordSkip(for: currentItem)
+        }
         moveToNext()
     }
     
     func toggleDeletion(for item: PhotoItem) {
         if let index = items.firstIndex(where: { $0.id == item.id }) {
             items[index].markedForDeletion.toggle()
+            persistSelectionState(for: items[index])
             refreshSession() // Refresh session to exclude已删除
         }
     }
@@ -511,6 +532,7 @@ final class PhotoCleanupViewModel: ObservableObject {
     func setDeletion(_ item: PhotoItem, to flag: Bool) {
         if let index = items.firstIndex(where: { $0.id == item.id }) {
             items[index].markedForDeletion = flag
+            persistSelectionState(for: items[index])
             refreshSession()
         }
     }
@@ -518,6 +540,7 @@ final class PhotoCleanupViewModel: ObservableObject {
     func removeFromPending(_ item: PhotoItem) {
         if let index = items.firstIndex(where: { $0.id == item.id }) {
             items[index].markedForDeletion = false
+            persistSelectionState(for: items[index])
             refreshSession()
         }
     }
@@ -588,6 +611,7 @@ final class PhotoCleanupViewModel: ObservableObject {
         }) { success, error in
             DispatchQueue.main.async {
                 if success {
+                    self.clearStoredRecords(for: toDeleteItems)
                     let toDeleteIds = Set(toDeleteAssets.map { $0.localIdentifier })
                     self.items.removeAll { toDeleteIds.contains($0.id) }
                     self.revalidateSimilarGroups()
@@ -624,6 +648,7 @@ final class PhotoCleanupViewModel: ObservableObject {
         guard var status = monthStatuses[key] else { return }
         status.userCleaned = cleaned
         monthStatuses[key] = status
+        progressStore.setMonthCleaned(year: year, month: month, cleaned: cleaned)
     }
 
     func computeMonthStatus(photos: [PhotoItem]) -> MonthStatus {
@@ -654,13 +679,82 @@ final class PhotoCleanupViewModel: ObservableObject {
         var updated: [String: MonthStatus] = [:]
         for (key, photos) in grouped {
             var status = computeMonthStatus(photos: photos)
-            if let existing = monthStatuses[key] {
+            if
+                let comps = components(fromMonthKey: key),
+                let persisted = progressStore.progress(year: comps.year, month: comps.month)
+            {
+                status.userCleaned = persisted.isMarkedCleaned
+            } else if let existing = monthStatuses[key] {
                 status.userCleaned = existing.userCleaned
             }
             updated[key] = status
         }
 
         monthStatuses = updated
+    }
+
+    private func rebuildMonthSession(year: Int, month: Int) {
+        let calendar = Calendar.current
+        let notDeleted = items.filter { !$0.markedForDeletion }
+        sessionItems = notDeleted.filter { item in
+            guard let date = item.creationDate else { return false }
+            let comps = calendar.dateComponents([.year, .month], from: date)
+            return comps.year == year && comps.month == month
+        }
+        currentFilter = .all
+        let storedProgress = progressStore.progress(year: year, month: month)?.processedCount ?? 0
+        currentIndex = min(storedProgress, sessionItems.count)
+    }
+
+    private func restoreSelectionStates(in items: inout [PhotoItem]) {
+        for index in items.indices {
+            guard
+                let comps = monthComponents(for: items[index]),
+                let progress = progressStore.progress(year: comps.year, month: comps.month)
+            else { continue }
+            if progress.selectedPhotoIds.contains(items[index].id) {
+                items[index].markedForDeletion = true
+            }
+        }
+    }
+
+    private func persistSelectionState(for item: PhotoItem) {
+        guard let comps = monthComponents(for: item) else { return }
+        progressStore.setPhoto(item.id, year: comps.year, month: comps.month, markedForDeletion: item.markedForDeletion)
+    }
+
+    private func recordSkip(for item: PhotoItem) {
+        guard let comps = monthComponents(for: item) else { return }
+        progressStore.recordSkip(item.id, year: comps.year, month: comps.month)
+    }
+
+    private func clearStoredRecords(for items: [PhotoItem]) {
+        for item in items {
+            guard let comps = monthComponents(for: item) else { continue }
+            progressStore.removePhotoRecords(item.id, year: comps.year, month: comps.month)
+        }
+    }
+
+    private func updateMonthProgressIfNeeded(newValue: Int) {
+        guard let context = activeMonthContext else { return }
+        progressStore.updateProcessedCount(year: context.year, month: context.month, to: newValue)
+    }
+
+    private func monthComponents(for item: PhotoItem) -> (year: Int, month: Int)? {
+        guard let date = item.creationDate else { return nil }
+        let comps = Calendar.current.dateComponents([.year, .month], from: date)
+        guard let year = comps.year, let month = comps.month else { return nil }
+        return (year, month)
+    }
+
+    private func components(fromMonthKey key: String) -> (year: Int, month: Int)? {
+        let parts = key.split(separator: "-")
+        guard parts.count == 2,
+              let year = Int(parts[0]),
+              let month = Int(parts[1]) else {
+            return nil
+        }
+        return (year, month)
     }
 
     private func shouldFlagForCleanup(_ item: PhotoItem) -> Bool {
