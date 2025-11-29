@@ -12,7 +12,6 @@ struct TrashView: View {
 
     private var items: [PhotoItem] { viewModel.pendingDeletionItems }
     private var totalSizeText: String { viewModel.pendingDeletionTotalSize.fileSizeDescription }
-    private var releaseSizeText: String { items.isEmpty ? "--" : totalSizeText }
     private let gridColumns = [
         GridItem(.flexible(), spacing: 12),
         GridItem(.flexible(), spacing: 12),
@@ -25,8 +24,6 @@ struct TrashView: View {
                 .overlay(
                     ScrollView(.vertical, showsIndicators: false) {
                         VStack(spacing: 16) {
-                            summary
-
                             if items.isEmpty {
                                 emptyState
                                     .frame(maxWidth: .infinity)
@@ -37,7 +34,7 @@ struct TrashView: View {
                                         TrashPreviewCell(item: item, viewModel: viewModel)
                                     }
                                 }
-                                .padding(.top, 8)
+                                .padding(.top, 46)
                             }
 
                             Spacer(minLength: 40)
@@ -114,16 +111,6 @@ struct TrashView: View {
         } message: { error in
             Text(error.localizedDescription)
         }
-    }
-
-    private var summary: some View {
-        HStack {
-            Text("可释放 \(releaseSizeText)")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-            Spacer()
-        }
-        .padding(.bottom, 4)
     }
 
     private var emptyState: some View {
