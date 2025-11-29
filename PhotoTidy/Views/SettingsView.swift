@@ -43,6 +43,7 @@ struct SettingsView: View {
                 }
             }
         }
+        .toolbar(viewModel.settingsNavigationPath.isEmpty ? .visible : .hidden, for: .tabBar)
     }
 }
 
@@ -462,8 +463,7 @@ struct PreferencesView: View {
             .padding(20)
         }
         .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
-        .toolbar(.hidden, for: .tabBar)
-        .navigationBarHidden(true)
+        .navigationBarBackButtonHidden(true)
     }
     
     private var preferenceToggles: some View {
@@ -556,7 +556,7 @@ struct AdvancedOperationsView: View {
             .padding(20)
         }
         .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
-        .toolbar(.hidden, for: .tabBar)
+        .navigationBarBackButtonHidden(true)
         .alert("确认清空待删区缓存？", isPresented: $showingClearPendingAlert) {
             Button("取消", role: .cancel) {}
             Button("清空", role: .destructive) {
@@ -573,7 +573,6 @@ struct AdvancedOperationsView: View {
         } message: {
             Text("将同时清除首页全相册整理与时光机（月度）的进度记录，恢复初始状态。")
         }
-        .navigationBarHidden(true)
     }
     
     private var clearCacheTile: some View {
@@ -681,8 +680,7 @@ struct PermissionsView: View {
             .padding(20)
         }
         .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
-        .toolbar(.hidden, for: .tabBar)
-        .navigationBarHidden(true)
+        .navigationBarBackButtonHidden(true)
     }
     
     private var photoPermissionTile: some View {
