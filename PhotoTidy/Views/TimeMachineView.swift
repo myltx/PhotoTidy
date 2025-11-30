@@ -62,6 +62,9 @@ struct TimeMachineView: View {
                     .padding(.bottom, 32)
                     .padding(.top, 16)
                 }
+                .transaction { transaction in
+                    transaction.animation = nil
+                }
                 .background(Color(UIColor.systemGray6).opacity(0.65))
             }
         }
@@ -184,9 +187,9 @@ private struct MonthSquare: View {
                         .font(.system(size: 22, weight: .bold))
                         .foregroundColor(palette.text)
 
-                    switch info.status {
+                    switch displayStatus {
                     case .notStarted:
-                        Text(info.totalPhotos > 0 ? "\(info.totalPhotos) 张" : "未开始")
+                        Text("待整理")
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundColor(palette.text.opacity(0.65))
                             .frame(height: 12)
@@ -211,7 +214,7 @@ private struct MonthSquare: View {
     }
 
     private var palette: Palette {
-        switch info.status {
+        switch displayStatus {
         case .notStarted:
             return Palette(
                 border: Color.indigo.opacity(0.85),
@@ -228,14 +231,20 @@ private struct MonthSquare: View {
             )
         case .completed:
             return Palette(
-                border: Color.gray.opacity(0.3),
-                background: Color.gray.opacity(0.15),
-                text: Color.gray,
-                glow: Color.clear
+                border: Color.green.opacity(0.45),
+                background: Color.green.opacity(0.12),
+                text: Color.green,
+                glow: Color.green.opacity(0.08)
             )
         }
     }
 
+    private var displayStatus: CleaningStatus {
+        if info.totalPhotos == 0 && info.processedCount == 0 {
+            return .completed
+        }
+        return info.status
+    }
 }
 
 private struct InProgressBadge: View {
@@ -283,7 +292,7 @@ private struct LegendView: View {
         HStack(spacing: 12) {
             LegendItem(color: Color.indigo, text: "待理")
             LegendItem(color: Color.orange, text: "进行")
-            LegendItem(color: Color.gray, text: "完成")
+            LegendItem(color: Color.green, text: "完成")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -307,6 +316,7 @@ private struct LegendItem: View {
                 .frame(width: 10, height: 10)
             Text(text)
                 .font(.caption2.weight(.bold))
+            
                 .foregroundColor(.secondary)
         }
     }

@@ -31,6 +31,8 @@
   - 分别缓存 `items`、`skipped`、`confirmed` 三路贡献，记录在 `itemMetrics / skippedMetrics / confirmedMetrics`。
   - 每路数据变更只计算受影响的月份键，更新对应 `MonthInfo` 后再发布新的 `YearSection`，避免整页重建。
   - `photoDates` 缓存相册中已知的创建时间，并在需要时懒加载缺失日期，实现“首帧秒出 + 静默累加”体验。
+  - 对于已经出现过的月份，只要仍然有任何指标数据，就保留其卡片并仅更新数值，同时在 SwiftUI 侧关闭 `LazyVGrid` 的隐式动画，避免卡片一闪一闪的视觉跳动。
+  - 首次进入时优先探测年份范围（先用已加载的 `PhotoItem` 推断，必要时通过两次轻量 `PHAsset` Fetch 拿到最早/最近年份），随后为这些年份一次性生成 12 个月的占位卡片，后续数据只是在卡片内渐进填充。
 
 ### SwiftUI 视图
 `TimeMachineView`

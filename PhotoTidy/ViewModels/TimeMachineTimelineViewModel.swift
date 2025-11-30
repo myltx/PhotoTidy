@@ -24,6 +24,7 @@ final class TimeMachineTimelineViewModel: ObservableObject {
     private var monthComponents: [String: (year: Int, month: Int)] = [:]
     private var photoDates: [String: Date] = [:]
     private var cachedSkippedRecords: [SkippedPhotoRecord] = []
+    private var availableYears: [Int] = []
 
     init(dataSource: PhotoCleanupViewModel) {
         self.dataSource = dataSource
@@ -33,6 +34,8 @@ final class TimeMachineTimelineViewModel: ObservableObject {
             self.handleItemsUpdate(dataSource.items)
             self.handleSkippedRecords(dataSource.skippedPhotoRecords, cacheRecords: true)
             self.handleSnapshotUpdate(dataSource.timeMachineSnapshots)
+            self.ensureYearRangeFromItems(dataSource.items)
+            self.ensureYearRangeFromLibraryIfNeeded()
         }
     }
 
@@ -84,6 +87,7 @@ final class TimeMachineTimelineViewModel: ObservableObject {
 
         // 重新计算跳过数量，避免因为照片刚加载导致月份缺失
         rebuildSkippedMetricsFromCache()
+        ensureYearRangeFromItems(items)
     }
 
     private func handleSkippedRecords(_ records: [SkippedPhotoRecord], cacheRecords: Bool) {
@@ -154,10 +158,10 @@ final class TimeMachineTimelineViewModel: ObservableObject {
             let skipped = skippedMetrics[key] ?? 0
             let confirmed = confirmedMetrics[key] ?? 0
 
-            if total == 0 && pending == 0 && skipped == 0 && confirmed == 0 {
-                if monthInfos.removeValue(forKey: key) != nil {
-                    changed = true
-                }
+            let hasMetricsSource = itemMetrics[key] != nil
+                || skippedMetrics[key] != nil
+                || confirmedMetrics[key] != nil
+            if !hasMetricsSource {
                 continue
             }
 
@@ -189,11 +193,20 @@ final class TimeMachineTimelineViewModel: ObservableObject {
             }
 
         let grouped = Dictionary(grouping: sortedInfos) { $0.year }
-        let builtSections = grouped
-            .map { year, months in
-                YearSection(year: year, months: months.sorted { $0.month > $1.month })
+        let builtSections: [YearSection]
+        if availableYears.isEmpty {
+            builtSections = grouped
+                .map { year, months in
+                    YearSection(year: year, months: months.sorted { $0.month > $1.month })
+                }
+                .sorted { $0.year > $1.year }
+        } else {
+            builtSections = availableYears.compactMap { year in
+                let months = (1...12).compactMap { monthInfos[monthKey(year: year, month: $0)] }
+                guard !months.isEmpty else { return nil }
+                return YearSection(year: year, months: months.sorted { $0.month > $1.month })
             }
-            .sorted { $0.year > $1.year }
+        }
 
         DispatchQueue.main.async { [weak self] in
             self?.sections = builtSections
@@ -235,6 +248,92 @@ final class TimeMachineTimelineViewModel: ObservableObject {
               let year = Int(parts[0]),
               let month = Int(parts[1]) else { return nil }
         return (year, month)
+    }
+
+    private func ensureYearRangeFromItems(_ items: [PhotoItem]) {
+        let years = items.compactMap { item -> Int? in
+            guard let date = item.creationDate else { return nil }
+            return calendar.component(.year, from: date)
+        }
+        if let minYear = years.min(), let maxYear = years.max() {
+            updateAvailableYears(minYear: minYear, maxYear: maxYear)
+        } else {
+            ensureYearRangeFromLibraryIfNeeded()
+        }
+    }
+
+    private func ensureYearRangeFromLibraryIfNeeded() {
+        guard availableYears.isEmpty else { return }
+        if let bounds = fetchYearBoundsFromLibrary() {
+            updateAvailableYears(minYear: bounds.min, maxYear: bounds.max)
+        } else {
+            let currentYear = calendar.component(.year, from: Date())
+            availableYears = [currentYear]
+            ensurePlaceholdersForAvailableYears()
+        }
+    }
+
+    private func fetchYearBoundsFromLibrary() -> (min: Int, max: Int)? {
+        let ascending = PHFetchOptions()
+        ascending.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
+        ascending.fetchLimit = 1
+        let descending = PHFetchOptions()
+        descending.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        descending.fetchLimit = 1
+
+        guard
+            let oldest = PHAsset.fetchAssets(with: ascending).firstObject?.creationDate,
+            let newest = PHAsset.fetchAssets(with: descending).firstObject?.creationDate
+        else {
+            return nil
+        }
+        let minYear = calendar.component(.year, from: oldest)
+        let maxYear = calendar.component(.year, from: newest)
+        return (minYear, maxYear)
+    }
+
+    private func updateAvailableYears(minYear: Int, maxYear: Int) {
+        let currentMin = availableYears.min()
+        let currentMax = availableYears.max()
+        let finalMin = currentMin.map { min($0, minYear) } ?? minYear
+        let finalMax = currentMax.map { max($0, maxYear) } ?? maxYear
+        if !availableYears.isEmpty,
+           currentMin == finalMin,
+           currentMax == finalMax {
+            return
+        }
+
+        availableYears = Array(stride(from: finalMax, through: finalMin, by: -1))
+        ensurePlaceholdersForAvailableYears()
+    }
+
+    private func ensurePlaceholdersForAvailableYears() {
+        guard !availableYears.isEmpty else { return }
+        var didAdd = false
+        for year in availableYears {
+            for month in 1...12 {
+                let key = monthKey(year: year, month: month)
+                guard monthInfos[key] == nil else { continue }
+                var placeholder = MonthInfo(
+                    year: year,
+                    month: month,
+                    totalPhotos: itemMetrics[key]?.totalPhotos ?? 0,
+                    skippedCount: skippedMetrics[key] ?? 0,
+                    pendingDeleteCount: itemMetrics[key]?.pendingDeleteCount ?? 0,
+                    confirmedCount: confirmedMetrics[key] ?? 0
+                )
+                if placeholder.totalPhotos == 0 && placeholder.processedCount == 0 {
+                    placeholder.status = .completed
+                    placeholder.progress = 1
+                }
+                monthInfos[key] = placeholder
+                monthComponents[key] = (year, month)
+                didAdd = true
+            }
+        }
+        if didAdd {
+            publishSections()
+        }
     }
 }
 
