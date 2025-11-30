@@ -64,6 +64,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     private var sessionItemIds: Set<String> = []
     private var selectedAlbumAssetIds: Set<String>?
     private var hasLoadedAlbumFilters = false
+    private var monthPrefetchingKeys: Set<String> = []
     private var hasScheduledInitialAssetLoad = false
 
     // MARK: - Computed Properties
@@ -293,6 +294,19 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
 
     func ensureAssetsPrepared() {
         scheduleInitialAssetLoad()
+    }
+
+    private func assets(in fetchResult: PHFetchResult<PHAsset>, year: Int, month: Int) -> [PHAsset] {
+        var matched: [PHAsset] = []
+        let calendar = Calendar.current
+        fetchResult.enumerateObjects { asset, _, _ in
+            guard let date = asset.creationDate ?? asset.modificationDate else { return }
+            let comps = calendar.dateComponents([.year, .month], from: date)
+            if comps.year == year && comps.month == month {
+                matched.append(asset)
+            }
+        }
+        return matched
     }
 
     private func startPagingLoader() {
@@ -1014,6 +1028,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     
     private func monthItems(year: Int, month: Int) -> [PhotoItem] {
         let calendar = Calendar.current
+        let key = "\(year)-\(month)"
         let filtered = items.filter { item in
             guard !item.markedForDeletion, let date = item.creationDate else { return false }
             let comps = calendar.dateComponents([.year, .month], from: date)
@@ -1030,6 +1045,10 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         let deferredCount = totalInMonth - sorted.count
         print("[TimeMachineMonthItems] \(year)-\(month): total=\(totalInMonth) visible=\(sorted.count) deferred=\(deferredCount)")
         #endif
+        if sorted.isEmpty,
+           let total = monthAssetTotals[key], total > 0 {
+            prefetchMonthAssetsIfNeeded(year: year, month: month)
+        }
         return sorted
     }
 
@@ -1250,6 +1269,22 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
                 #if DEBUG
                 print("[MonthAssetTotals] totals=\(counts)")
                 #endif
+            }
+        }
+    }
+
+    private func prefetchMonthAssetsIfNeeded(year: Int, month: Int) {
+        guard let fetchResult = assetsFetchResult else { return }
+        let key = "\(year)-\(month)"
+        guard !monthPrefetchingKeys.contains(key) else { return }
+        monthPrefetchingKeys.insert(key)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let assets = self.assets(in: fetchResult, year: year, month: month)
+            let limitedAssets = Array(assets.prefix(400))
+            DispatchQueue.main.async {
+                self.ingestAssets(limitedAssets)
+                self.monthPrefetchingKeys.remove(key)
             }
         }
     }
