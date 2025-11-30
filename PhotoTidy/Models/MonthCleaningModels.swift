@@ -29,6 +29,7 @@ struct MonthInfo: Identifiable, Equatable {
 
     var id: String { "\(year)-\(month)" }
     var processedCount: Int { skippedCount + pendingDeleteCount + confirmedCount }
+    var hasContent: Bool { totalPhotos > 0 || processedCount > 0 }
 
     init(
         year: Int,

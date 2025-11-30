@@ -189,6 +189,7 @@ private struct MonthSquare: View {
                 .aspectRatio(1, contentMode: .fit)
         }
         .buttonStyle(.plain)
+        .disabled(!info.hasContent)
     }
 
     private var monthLabel: String {
@@ -198,6 +199,14 @@ private struct MonthSquare: View {
     private var palette: Palette {
         switch displayStatus {
         case .notStarted:
+            if !info.hasContent {
+                return Palette(
+                    background: Color(UIColor.systemGray6),
+                    text: Color.gray.opacity(0.6),
+                    baseBorder: Color.gray.opacity(0.2),
+                    progressBorder: nil
+                )
+            }
             return Palette(
                 background: Color.white,
                 text: Color.indigo,
@@ -222,6 +231,9 @@ private struct MonthSquare: View {
     }
 
     private var displayStatus: CleaningStatus {
+        if !info.hasContent {
+            return .notStarted
+        }
         if info.totalPhotos == 0 && info.processedCount == 0 {
             return .completed
         }
@@ -229,6 +241,7 @@ private struct MonthSquare: View {
     }
 
     private var progressValue: Double {
+        guard info.hasContent else { return 0 }
         guard info.totalPhotos > 0 else { return 0 }
         let ratio = Double(info.processedCount) / Double(info.totalPhotos)
         return min(max(ratio, 0), 1)
@@ -236,7 +249,7 @@ private struct MonthSquare: View {
 
     @ViewBuilder
     private func progressOverlay(for shape: RoundedRectangle) -> some View {
-        if let color = palette.progressBorder {
+        if info.hasContent, let color = palette.progressBorder {
             shape
                 .trim(from: 0, to: CGFloat(progressValue))
                 .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
@@ -303,7 +316,7 @@ private struct LegendItem: View {
 private struct EmptyTimelineView: View {
     var body: some View {
         VStack(spacing: 14) {
-            Image(systemName: "calendar.badge.questionmark")
+            Image(systemName: "calendar.badge.exclamationmark")
                 .font(.system(size: 52))
                 .foregroundColor(.secondary)
             Text("暂无可展示的月份")

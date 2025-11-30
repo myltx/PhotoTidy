@@ -17,6 +17,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
 
     // Data
     @Published var items: [PhotoItem] = []
+    @Published var monthAssetTotals: [String: Int] = [:]
     @Published var sessionItems: [PhotoItem] = []
     @Published var lastFreedSpace: Int = 0
     @Published var lastDeletedItemsCount: Int = 0
@@ -1019,7 +1020,17 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             guard comps.year == year && comps.month == month else { return false }
             return !isPhotoDeferredInTimeMachine(item)
         }
-        return filtered.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
+        let sorted = filtered.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
+        #if DEBUG
+        let totalInMonth = items.filter { item in
+            guard let date = item.creationDate else { return false }
+            let comps = calendar.dateComponents([.year, .month], from: date)
+            return comps.year == year && comps.month == month
+        }.count
+        let deferredCount = totalInMonth - sorted.count
+        print("[TimeMachineMonthItems] \(year)-\(month): total=\(totalInMonth) visible=\(sorted.count) deferred=\(deferredCount)")
+        #endif
+        return sorted
     }
 
     private func filteredItems(for filter: CleanupFilterMode, from collection: [PhotoItem]) -> [PhotoItem] {
@@ -1205,6 +1216,7 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
             }
             self?.analysisCache.pruneMissingEntries(keeping: identifiers)
         }
+        rebuildMonthAssetTotals(from: fetchResult)
     }
 
     func photoLoader(_ loader: PhotoLoader, didLoadAssets assets: [PHAsset]) {
@@ -1219,5 +1231,26 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
         options.deliveryMode = .mediumQualityFormat
         options.isNetworkAccessAllowed = true
         PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { _, _, _ in }
+    }
+
+    private func rebuildMonthAssetTotals(from fetchResult: PHFetchResult<PHAsset>) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            var counts: [String: Int] = [:]
+            let calendar = Calendar.current
+            fetchResult.enumerateObjects { asset, _, _ in
+                guard let date = asset.creationDate ?? asset.modificationDate else { return }
+                let comps = calendar.dateComponents([.year, .month], from: date)
+                guard let year = comps.year, let month = comps.month else { return }
+                let key = "\(year)-\(month)"
+                counts[key, default: 0] += 1
+            }
+            DispatchQueue.main.async {
+                self.monthAssetTotals = counts
+                #if DEBUG
+                print("[MonthAssetTotals] totals=\(counts)")
+                #endif
+            }
+        }
     }
 }

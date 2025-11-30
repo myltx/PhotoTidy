@@ -21,6 +21,7 @@ final class TimeMachineTimelineViewModel: ObservableObject {
     private var itemMetrics: [String: ItemMetrics] = [:]
     private var skippedMetrics: [String: Int] = [:]
     private var confirmedMetrics: [String: Int] = [:]
+    private var assetTotals: [String: Int] = [:]
     private var monthInfos: [String: MonthInfo] = [:]
     private var monthComponents: [String: (year: Int, month: Int)] = [:]
     private var photoDates: [String: Date] = [:]
@@ -62,6 +63,13 @@ final class TimeMachineTimelineViewModel: ObservableObject {
                 self?.handleSnapshotUpdate(snapshots)
             }
             .store(in: &cancellables)
+
+        dataSource.$monthAssetTotals
+            .receive(on: processingQueue)
+            .sink { [weak self] totals in
+                self?.handleAssetTotals(totals)
+            }
+            .store(in: &cancellables)
     }
 
     private func handleItemsUpdate(_ items: [PhotoItem]) {
@@ -90,6 +98,7 @@ final class TimeMachineTimelineViewModel: ObservableObject {
         // 重新计算跳过数量，避免因为照片刚加载导致月份缺失
         rebuildSkippedMetricsFromCache()
         ensureYearRangeFromItems(items)
+        log("handleItemsUpdate items=\(items.count) changedKeys=\(changedKeys.count) years=\(availableYears)")
     }
 
     private func handleSkippedRecords(_ records: [SkippedPhotoRecord], cacheRecords: Bool) {
@@ -100,6 +109,7 @@ final class TimeMachineTimelineViewModel: ObservableObject {
         let changedKeys = diffKeys(old: skippedMetrics, new: newMetrics)
         skippedMetrics = newMetrics
         refreshMonthInfos(for: changedKeys)
+        log("handleSkippedRecords records=\(records.count) changedKeys=\(changedKeys.count)")
     }
 
     private func handleSnapshotUpdate(_ snapshots: [String: TimeMachineMonthProgress]) {
@@ -113,6 +123,7 @@ final class TimeMachineTimelineViewModel: ObservableObject {
         let changedKeys = diffKeys(old: confirmedMetrics, new: newMetrics)
         confirmedMetrics = newMetrics
         refreshMonthInfos(for: changedKeys)
+        log("handleSnapshotUpdate snapshots=\(snapshots.count) changedKeys=\(changedKeys.count)")
     }
 
     private func rebuildSkippedMetricsFromCache() {
@@ -122,6 +133,7 @@ final class TimeMachineTimelineViewModel: ObservableObject {
         guard !changedKeys.isEmpty else { return }
         skippedMetrics = newMetrics
         refreshMonthInfos(for: changedKeys)
+        log("rebuildSkippedMetricsFromCache changedKeys=\(changedKeys.count)")
     }
 
     private func buildSkippedMetrics(from records: [SkippedPhotoRecord]) -> [String: Int] {
@@ -155,7 +167,7 @@ final class TimeMachineTimelineViewModel: ObservableObject {
         var changed = false
 
         for key in keys {
-            let total = itemMetrics[key]?.totalPhotos ?? 0
+            let total = assetTotals[key] ?? itemMetrics[key]?.totalPhotos ?? 0
             let pending = itemMetrics[key]?.pendingDeleteCount ?? 0
             let skipped = skippedMetrics[key] ?? 0
             let confirmed = confirmedMetrics[key] ?? 0
@@ -163,7 +175,22 @@ final class TimeMachineTimelineViewModel: ObservableObject {
             let hasMetricsSource = itemMetrics[key] != nil
                 || skippedMetrics[key] != nil
                 || confirmedMetrics[key] != nil
+                || assetTotals[key] != nil
             if !hasMetricsSource {
+                if let comps = monthComponents[key] ?? components(fromKeyString: key) {
+                    let placeholder = MonthInfo(
+                        year: comps.year,
+                        month: comps.month,
+                        totalPhotos: 0,
+                        skippedCount: 0,
+                        pendingDeleteCount: 0,
+                        confirmedCount: 0
+                    )
+                    if monthInfos[key] != placeholder {
+                        monthInfos[key] = placeholder
+                        changed = true
+                    }
+                }
                 continue
             }
 
@@ -186,6 +213,7 @@ final class TimeMachineTimelineViewModel: ObservableObject {
         if changed {
             publishSections()
         }
+        log("refreshMonthInfos processedKeys=\(keys.count) changed=\(changed)")
     }
 
     private func publishSections() {
@@ -212,6 +240,7 @@ final class TimeMachineTimelineViewModel: ObservableObject {
 
         DispatchQueue.main.async { [weak self] in
             self?.sections = builtSections
+            self?.log("publishSections count=\(builtSections.count)")
         }
     }
 
@@ -262,13 +291,21 @@ final class TimeMachineTimelineViewModel: ObservableObject {
         } else {
             ensureYearRangeFromLibraryIfNeeded()
         }
+        log("ensureYearRangeFromItems years=\(years.sorted())")
     }
 
     private func ensureYearRangeFromLibraryIfNeeded() {
         guard availableYears.isEmpty else { return }
         if let years = fetchYearsFromLibrary() {
             mergeAvailableYears(with: Set(years))
+            log("ensureYearRangeFromLibrary -> \(years)")
         }
+    }
+
+    private func ensureYearRangeFromTotals(_ keys: Set<String>) {
+        let years = Set(keys.compactMap { components(fromKeyString: $0)?.year })
+        guard !years.isEmpty else { return }
+        mergeAvailableYears(with: years)
     }
     
     private func fetchYearsFromLibrary() -> [Int]? {
@@ -324,41 +361,14 @@ final class TimeMachineTimelineViewModel: ObservableObject {
         availableYears = sorted
         cacheAvailableYears()
         ensurePlaceholdersForAvailableYears()
-    }
-
-    private func ensurePlaceholdersForAvailableYears() {
-        guard !availableYears.isEmpty else { return }
-        var didAdd = false
-        for year in availableYears {
-            for month in 1...12 {
-                let key = monthKey(year: year, month: month)
-                guard monthInfos[key] == nil else { continue }
-                var placeholder = MonthInfo(
-                    year: year,
-                    month: month,
-                    totalPhotos: itemMetrics[key]?.totalPhotos ?? 0,
-                    skippedCount: skippedMetrics[key] ?? 0,
-                    pendingDeleteCount: itemMetrics[key]?.pendingDeleteCount ?? 0,
-                    confirmedCount: confirmedMetrics[key] ?? 0
-                )
-                if placeholder.totalPhotos == 0 && placeholder.processedCount == 0 {
-                    placeholder.status = .completed
-                    placeholder.progress = 1
-                }
-                monthInfos[key] = placeholder
-                monthComponents[key] = (year, month)
-                didAdd = true
-            }
-        }
-        if didAdd {
-            publishSections()
-        }
+        log("mergeAvailableYears -> \(availableYears)")
     }
 
     private func loadCachedYears() {
         if let cached = UserDefaults.standard.array(forKey: yearCacheKey) as? [Int], !cached.isEmpty {
             availableYears = cached
             ensurePlaceholdersForAvailableYears()
+            log("loadCachedYears -> \(cached)")
         }
     }
 
@@ -368,6 +378,40 @@ final class TimeMachineTimelineViewModel: ObservableObject {
         } else {
             UserDefaults.standard.set(availableYears, forKey: yearCacheKey)
         }
+    }
+
+    private func ensurePlaceholdersForAvailableYears() {
+        guard !availableYears.isEmpty else { return }
+        var changed = false
+        for year in availableYears {
+            for month in 1...12 {
+                let key = monthKey(year: year, month: month)
+                guard monthInfos[key] == nil else { continue }
+                let info = MonthInfo(
+                    year: year,
+                    month: month,
+                    totalPhotos: assetTotals[key] ?? itemMetrics[key]?.totalPhotos ?? 0,
+                    skippedCount: skippedMetrics[key] ?? 0,
+                    pendingDeleteCount: itemMetrics[key]?.pendingDeleteCount ?? 0,
+                    confirmedCount: confirmedMetrics[key] ?? 0
+                )
+                monthInfos[key] = info
+                monthComponents[key] = (year, month)
+                changed = true
+            }
+        }
+        if changed {
+            publishSections()
+        }
+        log("ensurePlaceholdersForAvailableYears changed=\(changed)")
+    }
+
+    private func handleAssetTotals(_ totals: [String: Int]) {
+        assetTotals = totals
+        let keys = Set(totals.keys)
+        ensureYearRangeFromTotals(keys)
+        refreshMonthInfos(for: keys)
+        log("handleAssetTotals keys=\(keys.count)")
     }
 }
 
@@ -387,4 +431,14 @@ private func diffKeys<Value: Equatable>(old: [String: Value], new: [String: Valu
         }
     }
     return changed
+}
+
+extension TimeMachineTimelineViewModel {
+    #if DEBUG
+    fileprivate func log(_ message: String) {
+        print("[TimeMachineTimeline] \(message)")
+    }
+    #else
+    fileprivate func log(_ message: String) {}
+    #endif
 }
