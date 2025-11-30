@@ -10,7 +10,7 @@ struct TimeMachineView: View {
         _timelineViewModel = StateObject(wrappedValue: TimeMachineTimelineViewModel(dataSource: viewModel))
     }
 
-    private let squareColumns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 4)
+    private let squareColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 6)
 
     var body: some View {
         NavigationStack {
@@ -45,9 +45,9 @@ struct TimeMachineView: View {
                     .padding(.top, 60)
             } else {
                 ScrollView {
-                    VStack(spacing: 32) {
+                    VStack(spacing: 24) {
                         ForEach(timelineViewModel.sections) { section in
-                            VStack(alignment: .leading, spacing: 16) {
+                            VStack(alignment: .leading, spacing: 10) {
                                 MonthGridHeader(
                                     title: "\(section.year) 年",
                                     primary: section.year == timelineViewModel.sections.first?.year
@@ -58,9 +58,9 @@ struct TimeMachineView: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, 32)
-                    .padding(.top, 16)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 20)
+                    .padding(.top, 12)
                 }
                 .transaction { transaction in
                     transaction.animation = nil
@@ -101,9 +101,9 @@ struct TimeMachineView: View {
                 LegendView()
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 20)
-        .padding(.bottom, 12)
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
         .background(.ultraThinMaterial)
     }
 }
@@ -174,37 +174,18 @@ private struct MonthSquare: View {
 
     var body: some View {
         Button(action: onTap) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(palette.background)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(palette.border, lineWidth: 2)
-                    )
-                    .shadow(color: palette.glow, radius: 8, x: 0, y: 0)
-                VStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(palette.background)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(palette.border, lineWidth: 1.5)
+                )
+                .overlay(
                     Text(monthLabel)
-                        .font(.system(size: 22, weight: .bold))
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(palette.text)
-
-                    switch displayStatus {
-                    case .notStarted:
-                        Text("待整理")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(palette.text.opacity(0.65))
-                            .frame(height: 12)
-                    case .inProgress:
-                        InProgressBadge(progress: info.progress)
-                    case .completed:
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(palette.text.opacity(0.7))
-                            .frame(height: 12)
-                    }
-                }
-                .padding(6)
-            }
-            .aspectRatio(1, contentMode: .fit)
+                )
+                .frame(height: 48)
         }
         .buttonStyle(.plain)
     }
@@ -244,28 +225,6 @@ private struct MonthSquare: View {
             return .completed
         }
         return info.status
-    }
-}
-
-private struct InProgressBadge: View {
-    let progress: Double
-
-    var body: some View {
-        let clamped = min(max(progress, 0), 1)
-        ZStack {
-            Circle()
-                .stroke(Color.orange.opacity(0.25), lineWidth: 3)
-                .frame(width: 28, height: 28)
-            Circle()
-                .trim(from: 0, to: CGFloat(clamped))
-                .stroke(Color.orange, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                .frame(width: 28, height: 28)
-                .rotationEffect(.degrees(-90))
-            Text("\(Int(round(clamped * 100)))%")
-                .font(.system(size: 7.5, weight: .bold, design: .rounded))
-                .foregroundColor(.orange)
-        }
-        .frame(height: 28)
     }
 }
 
