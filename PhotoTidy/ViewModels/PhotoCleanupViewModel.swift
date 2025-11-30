@@ -22,6 +22,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     @Published var lastFreedSpace: Int = 0
     @Published var lastDeletedItemsCount: Int = 0
     @Published var deviceStorageUsage: DeviceStorageUsage = .empty
+    @Published private(set) var metadataSnapshot: MetadataSnapshot = .empty
     @Published private(set) var timeMachineSnapshots: [String: TimeMachineMonthProgress] = [:]
     @Published var albumFilters: [AlbumFilter] = [.all]
     @Published var selectedAlbumFilter: AlbumFilter = .all
@@ -49,8 +50,13 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     @Published private(set) var smartCleanupProgress: SmartCleanupProgress?
     @Published private(set) var skippedPhotoRecords: [SkippedPhotoRecord] = []
     private let analysisCache: PhotoAnalysisCacheStore
+    private let metadataRepository: MetadataRepository
+    private let photoRepository = PhotoRepository()
+    private let imagePipeline = ImagePipeline()
+    private let taskPool = TaskPool()
+    private let backgroundScheduler = BackgroundJobScheduler()
     private var assetsFetchResult: PHFetchResult<PHAsset>?
-    private var cancellable: AnyCancellable?
+    private var cancellables: Set<AnyCancellable> = []
     private let zeroLatencyImageCache = ImageCache()
     private lazy var pagingLoader: PhotoLoader = {
         let loader = PhotoLoader(imageCache: zeroLatencyImageCache)
@@ -97,10 +103,30 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     }
 
     // Dashboard Stats
-    var similarItemsCount: Int { items.filter { $0.similarGroupId != nil }.count }
-    var blurredItemsCount: Int { items.filter { $0.isBlurredOrShaky }.count }
-    var screenshotItemsCount: Int { items.filter { $0.isScreenshot || $0.isDocumentLike }.count }
-    var largeFilesSize: Int { items.filter { $0.isLargeFile }.map { $0.fileSize }.reduce(0, +) }
+    var similarItemsCount: Int {
+        if FeatureToggles.enableZeroLatencyPipeline, items.isEmpty {
+            return metadataSnapshot.categoryCounters.similar
+        }
+        return items.filter { $0.similarGroupId != nil }.count
+    }
+    var blurredItemsCount: Int {
+        if FeatureToggles.enableZeroLatencyPipeline, items.isEmpty {
+            return metadataSnapshot.categoryCounters.blurred
+        }
+        return items.filter { $0.isBlurredOrShaky }.count
+    }
+    var screenshotItemsCount: Int {
+        if FeatureToggles.enableZeroLatencyPipeline, items.isEmpty {
+            return metadataSnapshot.categoryCounters.screenshot + metadataSnapshot.categoryCounters.document
+        }
+        return items.filter { $0.isScreenshot || $0.isDocumentLike }.count
+    }
+    var largeFilesSize: Int {
+        if FeatureToggles.enableZeroLatencyPipeline, items.isEmpty {
+            return metadataSnapshot.categoryCounters.largeFile * (15 * 1_024 * 1_024)
+        }
+        return items.filter { $0.isLargeFile }.map { $0.fileSize }.reduce(0, +)
+    }
 
     // Pending Deletion
     var pendingDeletionItems: [PhotoItem] { items.filter { $0.markedForDeletion }.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) } }
@@ -115,6 +141,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         analysisCache: PhotoAnalysisCacheStore = PhotoAnalysisCacheStore()
     ) {
         self.analysisCache = analysisCache
+        self.metadataRepository = MetadataRepository(analysisCache: analysisCache)
         self.timeMachineProgressStore = timeMachineProgressStore
         self.smartCleanupProgressStore = smartCleanupProgressStore
         self.skippedPhotoStore = skippedPhotoStore
@@ -122,20 +149,53 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         self.skippedPhotoRecords = skippedPhotoStore.allRecords()
         super.init()
         refreshTimeMachineSnapshots()
+        setupMetadataPipeline()
         PHPhotoLibrary.shared().register(self)
-        if authorizationStatus == .authorized || authorizationStatus == .limited {
-            scheduleInitialAssetLoad()
+        if authorizationStatus.isAuthorized {
+            ensureMetadataBootstrap()
+            if !FeatureToggles.enableZeroLatencyPipeline || !FeatureToggles.lazyLoadPhotoSessions {
+                scheduleInitialAssetLoad()
+            }
         }
         
-        cancellable = NotificationCenter.default
+        NotificationCenter.default
             .publisher(for: UIApplication.willEnterForegroundNotification)
             .sink { [weak self] _ in
                 self?.updateAuthorizationStatus()
             }
+            .store(in: &cancellables)
     }
     
     deinit {
         PHPhotoLibrary.shared().unregisterChangeObserver(self)
+        Task { await taskPool.cancelAll() }
+        Task { await backgroundScheduler.cancelAll() }
+    }
+
+    private func setupMetadataPipeline() {
+        metadataRepository.$snapshot
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] snapshot in
+                guard let self else { return }
+                self.metadataSnapshot = snapshot
+                if FeatureToggles.enableZeroLatencyPipeline {
+                    self.monthAssetTotals = snapshot.monthTotalsDictionary
+                    if snapshot.deviceStorageUsage.hasValidData {
+                        self.deviceStorageUsage = snapshot.deviceStorageUsage
+                    }
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    private func ensureMetadataBootstrap() {
+        guard FeatureToggles.enableZeroLatencyPipeline else { return }
+        metadataRepository.bootstrapIfNeeded()
+    }
+
+    private func ensureRealAssetPipeline() {
+        guard FeatureToggles.enableZeroLatencyPipeline, FeatureToggles.lazyLoadPhotoSessions else { return }
+        scheduleInitialAssetLoad()
     }
     
     // MARK: - Status Updates
@@ -146,8 +206,11 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             let newStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
             self.authorizationStatus = newStatus
 
-            if newStatus != oldStatus && (newStatus == .authorized || newStatus == .limited) {
-                self.scheduleInitialAssetLoad()
+            if newStatus != oldStatus && newStatus.isAuthorized {
+                self.ensureMetadataBootstrap()
+                if !FeatureToggles.enableZeroLatencyPipeline || !FeatureToggles.lazyLoadPhotoSessions {
+                    self.scheduleInitialAssetLoad()
+                }
             }
         }
     }
@@ -161,12 +224,17 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             guard let self else { return }
             self.resetPagingState()
             self.pagingLoader.reloadLibrary()
+            self.photoRepository.reloadLibrary()
+            if FeatureToggles.enableZeroLatencyPipeline {
+                self.metadataRepository.refresh()
+            }
         }
     }
     
     // MARK: - Navigation
     
     func showCleaner(filter: CleanupFilterMode) {
+        ensureRealAssetPipeline()
         activeMonthContext = nil
         isShowingCleaner = true
         updateSessionItems(for: filter)
@@ -182,6 +250,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     }
 
     func showCleaner(forMonth year: Int, month: Int) {
+        ensureRealAssetPipeline()
         activeMonthContext = (year, month)
         rebuildMonthSession(year: year, month: month)
         isShowingCleaner = true
@@ -193,6 +262,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     }
 
     func showDetail(_ detail: DashboardDetail) {
+        ensureRealAssetPipeline()
         activeDetail = detail
     }
 
@@ -260,8 +330,11 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.authorizationStatus = newStatus
-                if newStatus == .authorized || newStatus == .limited {
-                    self.scheduleInitialAssetLoad()
+                if newStatus.isAuthorized {
+                    self.ensureMetadataBootstrap()
+                    if !FeatureToggles.enableZeroLatencyPipeline || !FeatureToggles.lazyLoadPhotoSessions {
+                        self.scheduleInitialAssetLoad()
+                    }
                 }
             }
         }
@@ -277,6 +350,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     private func scheduleInitialAssetLoad() {
         guard !hasScheduledInitialAssetLoad else { return }
         hasScheduledInitialAssetLoad = true
+        Task { await self.photoRepository.bootstrapLibraryIfNeeded() }
         DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.05) { [weak self] in
             self?.performInitialAssetLoad()
         }
@@ -293,7 +367,15 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     }
 
     func ensureAssetsPrepared() {
-        scheduleInitialAssetLoad()
+        if FeatureToggles.enableZeroLatencyPipeline {
+            ensureMetadataBootstrap()
+            if !FeatureToggles.lazyLoadPhotoSessions {
+                scheduleInitialAssetLoad()
+            }
+        } else {
+            scheduleInitialAssetLoad()
+            refreshDeviceStorageUsage()
+        }
     }
 
     private func assets(in fetchResult: PHFetchResult<PHAsset>, year: Int, month: Int) -> [PHAsset] {
@@ -378,6 +460,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         sessionItems = []
         currentIndex = 0
         currentFilter = .all
+        Task { await taskPool.cancel(scope: .prefetch) }
     }
 
     private func ingestAssets(_ assets: [PHAsset]) {
@@ -445,7 +528,13 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     private func scheduleBackgroundAnalysisIfNeeded() {
         guard !hasTriggeredBackgroundAnalysis, !items.isEmpty else { return }
         hasTriggeredBackgroundAnalysis = true
-        analyzeAllItemsInBackground()
+        Task { await backgroundScheduler.cancel(job: .similarity) }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.backgroundScheduler.schedule(job: .similarity) { [weak self] in
+                self?.analyzeAllItemsInBackground()
+            }
+        }
     }
 
     private func analyzeAllItemsInBackground() {
@@ -1162,56 +1251,6 @@ struct SizeRange: Hashable {
     static let ultra = SizeRange(minBytes: 50 * 1_024 * 1_024, maxBytes: nil)
 }
 
-struct DeviceStorageUsage {
-    let totalBytes: Int64
-    let freeBytes: Int64
-    
-    var usedBytes: Int64 {
-        max(totalBytes - freeBytes, 0)
-    }
-    
-    var usagePercentage: Double {
-        guard totalBytes > 0 else { return 0 }
-        return Double(usedBytes) / Double(totalBytes)
-    }
-    
-    var hasValidData: Bool { totalBytes > 0 }
-    
-    var formattedPercentageText: String? {
-        guard hasValidData else { return nil }
-        let percent = max(0, min(usagePercentage * 100, 100))
-        return String(format: "%.0f%%", percent)
-    }
-    
-    var formattedUsageDetailText: String? {
-        guard hasValidData else { return nil }
-        let formatter = ByteCountFormatter()
-        formatter.countStyle = .file
-        formatter.allowsNonnumericFormatting = false
-        let used = formatter.string(fromByteCount: usedBytes)
-        let total = formatter.string(fromByteCount: totalBytes)
-        return "\(used) / \(total)"
-    }
-    
-    static let empty = DeviceStorageUsage(totalBytes: 0, freeBytes: 0)
-    
-    static func current() -> DeviceStorageUsage {
-        let path = NSHomeDirectory()
-        guard
-            let attributes = try? FileManager.default.attributesOfFileSystem(forPath: path),
-            let total = attributes[.systemSize] as? NSNumber,
-            let free = attributes[.systemFreeSize] as? NSNumber
-        else {
-            return .empty
-        }
-        
-        return DeviceStorageUsage(
-            totalBytes: total.int64Value,
-            freeBytes: free.int64Value
-        )
-    }
-}
-
 struct AlbumFilter: Identifiable, Equatable {
     let id: String
     let name: String
@@ -1228,6 +1267,7 @@ struct AlbumFilter: Identifiable, Equatable {
 extension PhotoCleanupViewModel: PhotoLoaderDelegate {
     func photoLoader(_ loader: PhotoLoader, didUpdateFetchResult fetchResult: PHFetchResult<PHAsset>) {
         assetsFetchResult = fetchResult
+        Task { await self.photoRepository.bootstrapLibraryIfNeeded() }
         DispatchQueue.global(qos: .utility).async { [weak self] in
             var identifiers: Set<String> = []
             fetchResult.enumerateObjects { asset, _, _ in
@@ -1235,7 +1275,9 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
             }
             self?.analysisCache.pruneMissingEntries(keeping: identifiers)
         }
-        rebuildMonthAssetTotals(from: fetchResult)
+        if !FeatureToggles.enableZeroLatencyPipeline {
+            rebuildMonthAssetTotals(from: fetchResult)
+        }
     }
 
     func photoLoader(_ loader: PhotoLoader, didLoadAssets assets: [PHAsset]) {
@@ -1274,10 +1316,30 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
     }
 
     private func prefetchMonthAssetsIfNeeded(year: Int, month: Int) {
-        guard let fetchResult = assetsFetchResult else { return }
         let key = "\(year)-\(month)"
         guard !monthPrefetchingKeys.contains(key) else { return }
         monthPrefetchingKeys.insert(key)
+
+        if FeatureToggles.enableZeroLatencyPipeline {
+            let task = Task<Void, Never> { [weak self] in
+                guard let self else { return }
+                let descriptors = await self.photoRepository.prefetchMonth(year, month: month, limit: 400)
+                guard !Task.isCancelled else { return }
+                let assets = descriptors.map(\.asset)
+                await MainActor.run {
+                    self.ingestAssets(assets)
+                    self.monthPrefetchingKeys.remove(key)
+                }
+                self.imagePipeline.prefetch(assets, targetSize: CGSize(width: 280, height: 280))
+            }
+            Task { [weak self] in
+                guard let self else { return }
+                await self.taskPool.insert(task, scope: .prefetch)
+            }
+            return
+        }
+
+        guard let fetchResult = assetsFetchResult else { return }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
             let assets = self.assets(in: fetchResult, year: year, month: month)
