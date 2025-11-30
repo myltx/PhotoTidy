@@ -258,7 +258,7 @@ final class TimeMachineTimelineViewModel: ObservableObject {
             return calendar.component(.year, from: date)
         })
         if !years.isEmpty {
-            updateAvailableYears(withExactYears: years)
+            mergeAvailableYears(with: years)
         } else {
             ensureYearRangeFromLibraryIfNeeded()
         }
@@ -267,10 +267,7 @@ final class TimeMachineTimelineViewModel: ObservableObject {
     private func ensureYearRangeFromLibraryIfNeeded() {
         guard availableYears.isEmpty else { return }
         if let years = fetchYearsFromLibrary() {
-            updateAvailableYears(withExactYears: Set(years))
-        } else {
-            availableYears = []
-            cacheAvailableYears()
+            mergeAvailableYears(with: Set(years))
         }
     }
     
@@ -319,8 +316,10 @@ final class TimeMachineTimelineViewModel: ObservableObject {
         return PHAsset.fetchAssets(with: options).firstObject != nil
     }
 
-    private func updateAvailableYears(withExactYears years: Set<Int>) {
-        let sorted = years.sorted(by: >)
+    private func mergeAvailableYears(with years: Set<Int>) {
+        guard !years.isEmpty else { return }
+        let combined = Set(availableYears).union(years)
+        let sorted = combined.sorted(by: >)
         guard sorted != availableYears else { return }
         availableYears = sorted
         cacheAvailableYears()
