@@ -63,6 +63,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     private var sessionItemIds: Set<String> = []
     private var selectedAlbumAssetIds: Set<String>?
     private var hasLoadedAlbumFilters = false
+    private var hasScheduledInitialAssetLoad = false
 
     // MARK: - Computed Properties
     
@@ -121,7 +122,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         refreshTimeMachineSnapshots()
         PHPhotoLibrary.shared().register(self)
         if authorizationStatus == .authorized || authorizationStatus == .limited {
-            loadAssets()
+            scheduleInitialAssetLoad()
         }
         
         cancellable = NotificationCenter.default
@@ -144,7 +145,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             self.authorizationStatus = newStatus
 
             if newStatus != oldStatus && (newStatus == .authorized || newStatus == .limited) {
-                self.loadAssets()
+                self.scheduleInitialAssetLoad()
             }
         }
     }
@@ -258,7 +259,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
                 guard let self = self else { return }
                 self.authorizationStatus = newStatus
                 if newStatus == .authorized || newStatus == .limited {
-                    self.loadAssets()
+                    self.scheduleInitialAssetLoad()
                 }
             }
         }
@@ -266,9 +267,31 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
 
     func loadAssets() {
         guard authorizationStatus == .authorized || authorizationStatus == .limited else { return }
-        isLoading = true
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.performInitialAssetLoad()
+        }
+    }
+
+    private func scheduleInitialAssetLoad() {
+        guard !hasScheduledInitialAssetLoad else { return }
+        hasScheduledInitialAssetLoad = true
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.performInitialAssetLoad()
+        }
+    }
+
+    private func performInitialAssetLoad() {
         loadAlbumFiltersIfNeeded()
-        startPagingLoader()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard authorizationStatus == .authorized || authorizationStatus == .limited else { return }
+            self.isLoading = true
+            self.startPagingLoader()
+        }
+    }
+
+    func ensureAssetsPrepared() {
+        scheduleInitialAssetLoad()
     }
 
     private func startPagingLoader() {

@@ -33,7 +33,7 @@ struct ContentView: View {
         .applyColorScheme(viewModel.selectedTheme.preferredColorScheme)
         .onAppear {
             if viewModel.authorizationStatus == .authorized || viewModel.authorizationStatus == .limited {
-                viewModel.loadAssets()
+                viewModel.ensureAssetsPrepared()
             }
         }
     }

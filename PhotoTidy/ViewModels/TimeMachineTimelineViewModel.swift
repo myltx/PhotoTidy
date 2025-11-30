@@ -16,6 +16,7 @@ final class TimeMachineTimelineViewModel: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private let processingQueue = DispatchQueue(label: "TimeMachineTimelineViewModel.queue", qos: .userInitiated)
     private let calendar = Calendar.current
+    private let yearCacheKey = "time_machine_available_years"
 
     private var itemMetrics: [String: ItemMetrics] = [:]
     private var skippedMetrics: [String: Int] = [:]
@@ -28,6 +29,7 @@ final class TimeMachineTimelineViewModel: ObservableObject {
 
     init(dataSource: PhotoCleanupViewModel) {
         self.dataSource = dataSource
+        loadCachedYears()
         bind()
         processingQueue.async { [weak self] in
             guard let self else { return }
@@ -251,12 +253,12 @@ final class TimeMachineTimelineViewModel: ObservableObject {
     }
 
     private func ensureYearRangeFromItems(_ items: [PhotoItem]) {
-        let years = items.compactMap { item -> Int? in
+        let years = Set(items.compactMap { item -> Int? in
             guard let date = item.creationDate else { return nil }
             return calendar.component(.year, from: date)
-        }
-        if let minYear = years.min(), let maxYear = years.max() {
-            updateAvailableYears(minYear: minYear, maxYear: maxYear)
+        })
+        if !years.isEmpty {
+            updateAvailableYears(withExactYears: years)
         } else {
             ensureYearRangeFromLibraryIfNeeded()
         }
@@ -264,46 +266,64 @@ final class TimeMachineTimelineViewModel: ObservableObject {
 
     private func ensureYearRangeFromLibraryIfNeeded() {
         guard availableYears.isEmpty else { return }
-        if let bounds = fetchYearBoundsFromLibrary() {
-            updateAvailableYears(minYear: bounds.min, maxYear: bounds.max)
+        if let years = fetchYearsFromLibrary() {
+            updateAvailableYears(withExactYears: Set(years))
         } else {
-            let currentYear = calendar.component(.year, from: Date())
-            availableYears = [currentYear]
-            ensurePlaceholdersForAvailableYears()
+            availableYears = []
+            cacheAvailableYears()
         }
     }
-
-    private func fetchYearBoundsFromLibrary() -> (min: Int, max: Int)? {
+    
+    private func fetchYearsFromLibrary() -> [Int]? {
         let ascending = PHFetchOptions()
         ascending.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
         ascending.fetchLimit = 1
+        guard let oldest = PHAsset.fetchAssets(with: ascending).firstObject?.creationDate else {
+            return nil
+        }
         let descending = PHFetchOptions()
         descending.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         descending.fetchLimit = 1
-
-        guard
-            let oldest = PHAsset.fetchAssets(with: ascending).firstObject?.creationDate,
-            let newest = PHAsset.fetchAssets(with: descending).firstObject?.creationDate
-        else {
+        guard let newest = PHAsset.fetchAssets(with: descending).firstObject?.creationDate else {
             return nil
         }
         let minYear = calendar.component(.year, from: oldest)
         let maxYear = calendar.component(.year, from: newest)
-        return (minYear, maxYear)
+        guard minYear <= maxYear else { return nil }
+
+        var years: [Int] = []
+        for year in stride(from: maxYear, through: minYear, by: -1) {
+            if hasAsset(in: year) {
+                years.append(year)
+            }
+        }
+        return years.isEmpty ? nil : years
     }
 
-    private func updateAvailableYears(minYear: Int, maxYear: Int) {
-        let currentMin = availableYears.min()
-        let currentMax = availableYears.max()
-        let finalMin = currentMin.map { min($0, minYear) } ?? minYear
-        let finalMax = currentMax.map { max($0, maxYear) } ?? maxYear
-        if !availableYears.isEmpty,
-           currentMin == finalMin,
-           currentMax == finalMax {
-            return
+    private func hasAsset(in year: Int) -> Bool {
+        var startComponents = DateComponents()
+        startComponents.year = year
+        startComponents.month = 1
+        startComponents.day = 1
+        var endComponents = DateComponents()
+        endComponents.year = year + 1
+        endComponents.month = 1
+        endComponents.day = 1
+        guard let startDate = calendar.date(from: startComponents),
+              let endDate = calendar.date(from: endComponents) else {
+            return false
         }
+        let options = PHFetchOptions()
+        options.predicate = NSPredicate(format: "creationDate >= %@ AND creationDate < %@", startDate as NSDate, endDate as NSDate)
+        options.fetchLimit = 1
+        return PHAsset.fetchAssets(with: options).firstObject != nil
+    }
 
-        availableYears = Array(stride(from: finalMax, through: finalMin, by: -1))
+    private func updateAvailableYears(withExactYears years: Set<Int>) {
+        let sorted = years.sorted(by: >)
+        guard sorted != availableYears else { return }
+        availableYears = sorted
+        cacheAvailableYears()
         ensurePlaceholdersForAvailableYears()
     }
 
@@ -333,6 +353,21 @@ final class TimeMachineTimelineViewModel: ObservableObject {
         }
         if didAdd {
             publishSections()
+        }
+    }
+
+    private func loadCachedYears() {
+        if let cached = UserDefaults.standard.array(forKey: yearCacheKey) as? [Int], !cached.isEmpty {
+            availableYears = cached
+            ensurePlaceholdersForAvailableYears()
+        }
+    }
+
+    private func cacheAvailableYears() {
+        if availableYears.isEmpty {
+            UserDefaults.standard.removeObject(forKey: yearCacheKey)
+        } else {
+            UserDefaults.standard.set(availableYears, forKey: yearCacheKey)
         }
     }
 }
