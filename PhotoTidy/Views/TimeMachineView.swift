@@ -264,13 +264,8 @@ private struct YearBadge: View {
     let text: String
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text(text)
-                .font(.title3.bold())
-            Image(systemName: "chevron.down")
-                .font(.caption)
-                .foregroundColor(.gray)
-        }
+        Text(text)
+            .font(.title3.bold())
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -27,6 +27,10 @@
 - 在后台队列聚合月份数据，生成 `[YearSection]`（年 → 多个 `MonthInfo`）。
 - 自动处理跳过记录缺失日期的情况，必要时向 PhotoKit 查询。
 - 通过 `@Published` 输出给 SwiftUI 视图，任何来源数据变化都会实时刷新。
+- **增量更新模式（最新实现）**：
+  - 分别缓存 `items`、`skipped`、`confirmed` 三路贡献，记录在 `itemMetrics / skippedMetrics / confirmedMetrics`。
+  - 每路数据变更只计算受影响的月份键，更新对应 `MonthInfo` 后再发布新的 `YearSection`，避免整页重建。
+  - `photoDates` 缓存相册中已知的创建时间，并在需要时懒加载缺失日期，实现“首帧秒出 + 静默累加”体验。
 
 ### SwiftUI 视图
 `TimeMachineView`

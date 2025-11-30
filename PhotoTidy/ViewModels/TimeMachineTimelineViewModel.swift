@@ -14,101 +14,111 @@ final class TimeMachineTimelineViewModel: ObservableObject {
 
     private let dataSource: PhotoCleanupViewModel
     private var cancellables: Set<AnyCancellable> = []
+    private let processingQueue = DispatchQueue(label: "TimeMachineTimelineViewModel.queue", qos: .userInitiated)
     private let calendar = Calendar.current
+
+    private var itemMetrics: [String: ItemMetrics] = [:]
+    private var skippedMetrics: [String: Int] = [:]
+    private var confirmedMetrics: [String: Int] = [:]
+    private var monthInfos: [String: MonthInfo] = [:]
+    private var monthComponents: [String: (year: Int, month: Int)] = [:]
+    private var photoDates: [String: Date] = [:]
+    private var cachedSkippedRecords: [SkippedPhotoRecord] = []
 
     init(dataSource: PhotoCleanupViewModel) {
         self.dataSource = dataSource
         bind()
-        rebuildTimeline(
-            items: dataSource.items,
-            skippedRecords: dataSource.skippedPhotoRecords,
-            snapshots: dataSource.timeMachineSnapshots
-        )
+        processingQueue.async { [weak self] in
+            guard let self else { return }
+            self.handleItemsUpdate(dataSource.items)
+            self.handleSkippedRecords(dataSource.skippedPhotoRecords, cacheRecords: true)
+            self.handleSnapshotUpdate(dataSource.timeMachineSnapshots)
+        }
     }
 
     private func bind() {
-        Publishers.CombineLatest3(
-            dataSource.$items,
-            dataSource.$skippedPhotoRecords,
-            dataSource.$timeMachineSnapshots
-        )
-        .receive(on: DispatchQueue.global(qos: .userInitiated))
-        .sink { [weak self] items, skipped, snapshots in
-            self?.rebuildTimeline(items: items, skippedRecords: skipped, snapshots: snapshots)
-        }
-        .store(in: &cancellables)
+        dataSource.$items
+            .receive(on: processingQueue)
+            .sink { [weak self] items in
+                self?.handleItemsUpdate(items)
+            }
+            .store(in: &cancellables)
+
+        dataSource.$skippedPhotoRecords
+            .receive(on: processingQueue)
+            .sink { [weak self] records in
+                self?.handleSkippedRecords(records, cacheRecords: true)
+            }
+            .store(in: &cancellables)
+
+        dataSource.$timeMachineSnapshots
+            .receive(on: processingQueue)
+            .sink { [weak self] snapshots in
+                self?.handleSnapshotUpdate(snapshots)
+            }
+            .store(in: &cancellables)
     }
 
-    private func rebuildTimeline(
-        items: [PhotoItem],
-        skippedRecords: [SkippedPhotoRecord],
-        snapshots: [String: TimeMachineMonthProgress]
-    ) {
-        guard !items.isEmpty || !skippedRecords.isEmpty || !snapshots.isEmpty else {
-            DispatchQueue.main.async { [weak self] in
-                self?.sections = []
-            }
-            return
-        }
-
-        var accumulators: [String: MonthAccumulator] = [:]
-        var photoDates: [String: Date] = [:]
+    private func handleItemsUpdate(_ items: [PhotoItem]) {
+        var newMetrics: [String: ItemMetrics] = [:]
+        var newDates: [String: Date] = [:]
 
         for item in items {
-            guard let date = item.creationDate else { continue }
-            let comps = calendar.dateComponents([.year, .month], from: date)
-            guard let year = comps.year, let month = comps.month else { continue }
-            let key = monthKey(year: year, month: month)
-            var entry = accumulators[key] ?? MonthAccumulator()
-            entry.totalPhotos += 1
-            if item.markedForDeletion { entry.pendingDeleteCount += 1 }
-            accumulators[key] = entry
-            photoDates[item.id] = date
+            let date = item.creationDate ?? Date()
+            guard let comps = components(from: date) else { continue }
+            let key = monthKey(year: comps.year, month: comps.month)
+            var metrics = newMetrics[key] ?? ItemMetrics(year: comps.year, month: comps.month, totalPhotos: 0, pendingDeleteCount: 0)
+            metrics.totalPhotos += 1
+            if item.markedForDeletion {
+                metrics.pendingDeleteCount += 1
+            }
+            newMetrics[key] = metrics
+            newDates[item.id] = date
+            monthComponents[key] = (comps.year, comps.month)
         }
 
-        let skippedCounts = buildSkippedCounts(from: skippedRecords, photoDates: photoDates)
+        photoDates = newDates
+        let changedKeys = diffKeys(old: itemMetrics, new: newMetrics)
+        itemMetrics = newMetrics
+        refreshMonthInfos(for: changedKeys)
 
-        var monthInfos: [MonthInfo] = []
-        let keys = Set(accumulators.keys)
-            .union(skippedCounts.keys)
-            .union(snapshots.keys)
-
-        for key in keys {
-            guard let comps = components(from: key) else { continue }
-            let total = accumulators[key]?.totalPhotos ?? 0
-            let pending = accumulators[key]?.pendingDeleteCount ?? 0
-            let skipped = skippedCounts[key] ?? 0
-            let confirmed = snapshots[key]?.confirmedPhotoIds.count ?? 0
-            let info = MonthInfo(
-                year: comps.year,
-                month: comps.month,
-                totalPhotos: total,
-                skippedCount: skipped,
-                pendingDeleteCount: pending,
-                confirmedCount: confirmed
-            )
-            monthInfos.append(info)
-        }
-
-        monthInfos.sort { lhs, rhs in
-            lhs.year == rhs.year ? lhs.month > rhs.month : lhs.year > rhs.year
-        }
-
-        let grouped = Dictionary(grouping: monthInfos) { $0.year }
-        let sections = grouped.map { year, months in
-            YearSection(year: year, months: months.sorted { $0.month > $1.month })
-        }
-        .sorted { $0.year > $1.year }
-
-        DispatchQueue.main.async { [weak self] in
-            self?.sections = sections
-        }
+        // 重新计算跳过数量，避免因为照片刚加载导致月份缺失
+        rebuildSkippedMetricsFromCache()
     }
 
-    private func buildSkippedCounts(
-        from records: [SkippedPhotoRecord],
-        photoDates: [String: Date]
-    ) -> [String: Int] {
+    private func handleSkippedRecords(_ records: [SkippedPhotoRecord], cacheRecords: Bool) {
+        if cacheRecords {
+            cachedSkippedRecords = records
+        }
+        let newMetrics = buildSkippedMetrics(from: records)
+        let changedKeys = diffKeys(old: skippedMetrics, new: newMetrics)
+        skippedMetrics = newMetrics
+        refreshMonthInfos(for: changedKeys)
+    }
+
+    private func handleSnapshotUpdate(_ snapshots: [String: TimeMachineMonthProgress]) {
+        var newMetrics: [String: Int] = [:]
+        for progress in snapshots.values {
+            let key = monthKey(year: progress.year, month: progress.month)
+            newMetrics[key] = progress.confirmedPhotoIds.count
+            monthComponents[key] = (progress.year, progress.month)
+        }
+
+        let changedKeys = diffKeys(old: confirmedMetrics, new: newMetrics)
+        confirmedMetrics = newMetrics
+        refreshMonthInfos(for: changedKeys)
+    }
+
+    private func rebuildSkippedMetricsFromCache() {
+        guard !cachedSkippedRecords.isEmpty else { return }
+        let newMetrics = buildSkippedMetrics(from: cachedSkippedRecords)
+        let changedKeys = diffKeys(old: skippedMetrics, new: newMetrics)
+        guard !changedKeys.isEmpty else { return }
+        skippedMetrics = newMetrics
+        refreshMonthInfos(for: changedKeys)
+    }
+
+    private func buildSkippedMetrics(from records: [SkippedPhotoRecord]) -> [String: Int] {
         let filtered = records.filter { $0.source == .timeMachine }
         guard !filtered.isEmpty else { return [:] }
 
@@ -124,42 +134,124 @@ final class TimeMachineTimelineViewModel: ObservableObject {
         }
 
         if !missingIds.isEmpty {
-            let fetched = PHAsset.fetchAssets(withLocalIdentifiers: missingIds, options: nil)
-            fetched.enumerateObjects { [weak self] asset, _, _ in
-                guard
-                    let self,
-                    let date = asset.creationDate
-                else { return }
-                self.accumulateSkip(for: date, counts: &counts)
+            let fetchedDates = fetchCreationDates(for: missingIds)
+            for (id, date) in fetchedDates {
+                photoDates[id] = date
+                accumulateSkip(for: date, counts: &counts)
             }
         }
 
         return counts
     }
 
+    private func refreshMonthInfos(for keys: Set<String>) {
+        guard !keys.isEmpty else { return }
+        var changed = false
+
+        for key in keys {
+            let total = itemMetrics[key]?.totalPhotos ?? 0
+            let pending = itemMetrics[key]?.pendingDeleteCount ?? 0
+            let skipped = skippedMetrics[key] ?? 0
+            let confirmed = confirmedMetrics[key] ?? 0
+
+            if total == 0 && pending == 0 && skipped == 0 && confirmed == 0 {
+                if monthInfos.removeValue(forKey: key) != nil {
+                    changed = true
+                }
+                continue
+            }
+
+            guard let comps = monthComponents[key] ?? components(fromKeyString: key) else { continue }
+            let info = MonthInfo(
+                year: comps.year,
+                month: comps.month,
+                totalPhotos: total,
+                skippedCount: skipped,
+                pendingDeleteCount: pending,
+                confirmedCount: confirmed
+            )
+            if monthInfos[key] != info {
+                monthInfos[key] = info
+                changed = true
+            }
+            monthComponents[key] = comps
+        }
+
+        if changed {
+            publishSections()
+        }
+    }
+
+    private func publishSections() {
+        let sortedInfos = monthInfos.values
+            .sorted { lhs, rhs in
+                lhs.year == rhs.year ? lhs.month > rhs.month : lhs.year > rhs.year
+            }
+
+        let grouped = Dictionary(grouping: sortedInfos) { $0.year }
+        let builtSections = grouped
+            .map { year, months in
+                YearSection(year: year, months: months.sorted { $0.month > $1.month })
+            }
+            .sorted { $0.year > $1.year }
+
+        DispatchQueue.main.async { [weak self] in
+            self?.sections = builtSections
+        }
+    }
+
     private func accumulateSkip(for date: Date, counts: inout [String: Int]) {
-        let comps = calendar.dateComponents([.year, .month], from: date)
-        guard let year = comps.year, let month = comps.month else { return }
-        let key = monthKey(year: year, month: month)
+        guard let comps = components(from: date) else { return }
+        let key = monthKey(year: comps.year, month: comps.month)
         counts[key, default: 0] += 1
+        monthComponents[key] = (comps.year, comps.month)
+    }
+
+    private func fetchCreationDates(for identifiers: [String]) -> [String: Date] {
+        guard !identifiers.isEmpty else { return [:] }
+        var results: [String: Date] = [:]
+        let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
+        fetchResult.enumerateObjects { asset, _, _ in
+            if let date = asset.creationDate {
+                results[asset.localIdentifier] = date
+            }
+        }
+        return results
     }
 
     private func monthKey(year: Int, month: Int) -> String {
         "\(year)-\(month)"
     }
 
-    private func components(from key: String) -> (year: Int, month: Int)? {
+    private func components(from date: Date) -> (year: Int, month: Int)? {
+        let comps = calendar.dateComponents([.year, .month], from: date)
+        guard let year = comps.year, let month = comps.month else { return nil }
+        return (year, month)
+    }
+
+    private func components(fromKeyString key: String) -> (year: Int, month: Int)? {
         let parts = key.split(separator: "-")
         guard parts.count == 2,
               let year = Int(parts[0]),
-              let month = Int(parts[1]) else {
-            return nil
-        }
+              let month = Int(parts[1]) else { return nil }
         return (year, month)
     }
 }
 
-private struct MonthAccumulator {
-    var totalPhotos: Int = 0
-    var pendingDeleteCount: Int = 0
+private struct ItemMetrics: Equatable {
+    let year: Int
+    let month: Int
+    var totalPhotos: Int
+    var pendingDeleteCount: Int
+}
+
+private func diffKeys<Value: Equatable>(old: [String: Value], new: [String: Value]) -> Set<String> {
+    var changed: Set<String> = []
+    let keys = Set(old.keys).union(new.keys)
+    for key in keys {
+        if old[key] != new[key] {
+            changed.insert(key)
+        }
+    }
+    return changed
 }
