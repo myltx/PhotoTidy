@@ -34,32 +34,20 @@ final class TimeMachineProgressStore {
         return values
     }
 
-    func updateProcessedCount(year: Int, month: Int, to processedCount: Int) {
-        modifyProgress(year: year, month: month) { progress in
-            progress.processedCount = max(processedCount, 0)
-        }
-    }
-
-    func setMonthCleaned(year: Int, month: Int, cleaned: Bool) {
-        modifyProgress(year: year, month: month) { progress in
-            progress.isMarkedCleaned = cleaned
-        }
-    }
-
     func setPhoto(_ photoId: String, year: Int, month: Int, markedForDeletion: Bool) {
         modifyProgress(year: year, month: month) { progress in
             if markedForDeletion {
                 progress.selectedPhotoIds.insert(photoId)
-                progress.skippedPhotoIds.remove(photoId)
+                progress.confirmedPhotoIds.remove(photoId)
             } else {
                 progress.selectedPhotoIds.remove(photoId)
             }
         }
     }
 
-    func recordSkip(_ photoId: String, year: Int, month: Int) {
+    func confirmPhoto(_ photoId: String, year: Int, month: Int) {
         modifyProgress(year: year, month: month) { progress in
-            progress.skippedPhotoIds.insert(photoId)
+            progress.confirmedPhotoIds.insert(photoId)
             progress.selectedPhotoIds.remove(photoId)
         }
     }
@@ -67,7 +55,7 @@ final class TimeMachineProgressStore {
     func removePhotoRecords(_ photoId: String, year: Int, month: Int) {
         modifyProgress(year: year, month: month) { progress in
             progress.selectedPhotoIds.remove(photoId)
-            progress.skippedPhotoIds.remove(photoId)
+            progress.confirmedPhotoIds.remove(photoId)
         }
     }
     

@@ -16,16 +16,12 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     }
 
     // Data
-    @Published var items: [PhotoItem] = [] {
-        didSet {
-            rebuildMonthStatuses(with: items)
-        }
-    }
+    @Published var items: [PhotoItem] = []
     @Published var sessionItems: [PhotoItem] = []
     @Published var lastFreedSpace: Int = 0
     @Published var lastDeletedItemsCount: Int = 0
     @Published var deviceStorageUsage: DeviceStorageUsage = .empty
-    @Published private(set) var monthStatuses: [String: MonthStatus] = [:]
+    @Published private(set) var timeMachineSnapshots: [String: TimeMachineMonthProgress] = [:]
     @Published var albumFilters: [AlbumFilter] = [.all]
     @Published var selectedAlbumFilter: AlbumFilter = .all
     
@@ -122,6 +118,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         self.smartCleanupProgress = smartCleanupProgressStore.load()
         self.skippedPhotoRecords = skippedPhotoStore.allRecords()
         super.init()
+        refreshTimeMachineSnapshots()
         PHPhotoLibrary.shared().register(self)
         if authorizationStatus == .authorized || authorizationStatus == .limited {
             loadAssets()
@@ -569,7 +566,6 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
 
     func moveToNext() {
         guard !sessionItems.isEmpty else {
-            updateMonthProgressIfNeeded(newValue: 0)
             return
         }
 
@@ -578,13 +574,10 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         } else {
             currentIndex = sessionItems.count
         }
-
-        updateMonthProgressIfNeeded(newValue: currentIndex)
     }
 
     private func removeCurrentItemFromSession() {
         guard !sessionItems.isEmpty else {
-            updateMonthProgressIfNeeded(newValue: 0)
             return
         }
         let removedIndex = currentIndex
@@ -595,7 +588,6 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         } else if currentIndex >= sessionItems.count {
             currentIndex = max(sessionItems.count - 1, 0)
         }
-        updateMonthProgressIfNeeded(newValue: currentIndex)
     }
 
     func markCurrentForDeletion() {
@@ -610,14 +602,13 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
 
     func keepCurrent() {
         guard let currentItem = currentItem else { return }
-        recordSkip(for: currentItem)
+        recordConfirmation(for: currentItem)
         removeCurrentItemFromSession()
     }
     
     func skipCurrent() {
         guard let currentItem = currentItem else { return }
         logSkippedPhoto(currentItem, source: currentSkippedSource())
-        recordSkip(for: currentItem)
         removeCurrentItemFromSession()
     }
     
@@ -665,10 +656,10 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     
     func resetCleanupProgress() {
         timeMachineProgressStore.resetAll()
+        refreshTimeMachineSnapshots()
         storeSmartCleanupProgress(nil)
         activeMonthContext = nil
         currentIndex = 0
-        rebuildMonthStatuses(with: items)
         refreshSession()
     }
     
@@ -678,7 +669,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     
     func resetTimeMachineProgress() {
         timeMachineProgressStore.resetAll()
-        rebuildMonthStatuses(with: items)
+        refreshTimeMachineSnapshots()
         if let context = activeMonthContext {
             rebuildMonthSession(year: context.year, month: context.month)
         } else {
@@ -790,61 +781,10 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
 
     // MARK: - Month Status Tracking
 
-    func markMonth(year: Int, month: Int, asCleaned cleaned: Bool) {
-        let key = monthKey(year: year, month: month)
-        guard var status = monthStatuses[key] else { return }
-        status.userCleaned = cleaned
-        monthStatuses[key] = status
-        timeMachineProgressStore.setMonthCleaned(year: year, month: month, cleaned: cleaned)
-    }
-
-    func computeMonthStatus(photos: [PhotoItem]) -> MonthStatus {
-        guard !photos.isEmpty else {
-            return MonthStatus(totalPhotos: 0, predictedPendingCount: 0, userCleaned: false)
-        }
-
-        let predicted = photos.reduce(into: 0) { partialResult, item in
-            if shouldFlagForCleanup(item) {
-                partialResult += 1
-            }
-        }
-
-        return MonthStatus(
-            totalPhotos: photos.count,
-            predictedPendingCount: predicted,
-            userCleaned: false
-        )
-    }
-
-    private func rebuildMonthStatuses(with items: [PhotoItem]) {
-        let grouped = Dictionary(grouping: items) { (item: PhotoItem) -> String in
-            let date = item.creationDate ?? Date()
-            let comps = Calendar.current.dateComponents([.year, .month], from: date)
-            return monthKey(year: comps.year ?? 0, month: comps.month ?? 0)
-        }
-
-        var updated: [String: MonthStatus] = [:]
-        for (key, photos) in grouped {
-            var status = computeMonthStatus(photos: photos)
-            if
-                let comps = components(fromMonthKey: key),
-                let persisted = timeMachineProgressStore.progress(year: comps.year, month: comps.month)
-            {
-                status.userCleaned = persisted.isMarkedCleaned
-            } else if let existing = monthStatuses[key] {
-                status.userCleaned = existing.userCleaned
-            }
-            updated[key] = status
-        }
-
-        monthStatuses = updated
-    }
-
     private func rebuildMonthSession(year: Int, month: Int) {
         sessionItems = monthItems(year: year, month: month)
         currentFilter = .all
-        let storedProgress = timeMachineProgressStore.progress(year: year, month: month)?.processedCount ?? 0
-        currentIndex = min(storedProgress, sessionItems.count)
+        currentIndex = 0
         sessionItemIds = Set(sessionItems.map(\.id))
     }
 
@@ -952,6 +892,13 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         skippedPhotoRecords = skippedPhotoStore.allRecords()
     }
 
+    private func refreshTimeMachineSnapshots() {
+        let progresses = timeMachineProgressStore.allProgresses()
+        var snapshot: [String: TimeMachineMonthProgress] = [:]
+        progresses.forEach { snapshot[$0.key] = $0 }
+        timeMachineSnapshots = snapshot
+    }
+
     func logSkippedPhoto(_ item: PhotoItem, source: SkippedPhotoSource) {
         skippedPhotoStore.record(photoId: item.id, source: source)
         refreshSkippedPhotoRecords()
@@ -1007,11 +954,13 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     private func persistSelectionState(for item: PhotoItem) {
         guard let comps = monthComponents(for: item) else { return }
         timeMachineProgressStore.setPhoto(item.id, year: comps.year, month: comps.month, markedForDeletion: item.markedForDeletion)
+        refreshTimeMachineSnapshots()
     }
 
-    private func recordSkip(for item: PhotoItem) {
+    private func recordConfirmation(for item: PhotoItem) {
         guard let comps = monthComponents(for: item) else { return }
-        timeMachineProgressStore.recordSkip(item.id, year: comps.year, month: comps.month)
+        timeMachineProgressStore.confirmPhoto(item.id, year: comps.year, month: comps.month)
+        refreshTimeMachineSnapshots()
     }
 
     private func clearStoredRecords(for items: [PhotoItem]) {
@@ -1019,11 +968,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             guard let comps = monthComponents(for: item) else { continue }
             timeMachineProgressStore.removePhotoRecords(item.id, year: comps.year, month: comps.month)
         }
-    }
-
-    private func updateMonthProgressIfNeeded(newValue: Int) {
-        guard let context = activeMonthContext else { return }
-        timeMachineProgressStore.updateProcessedCount(year: context.year, month: context.month, to: newValue)
+        refreshTimeMachineSnapshots()
     }
 
     private func monthComponents(for item: PhotoItem) -> (year: Int, month: Int)? {
@@ -1049,13 +994,13 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             guard !item.markedForDeletion, let date = item.creationDate else { return false }
             let comps = calendar.dateComponents([.year, .month], from: date)
             guard comps.year == year && comps.month == month else { return false }
-            return !isPhotoSkipped(item)
+            return !isPhotoDeferredInTimeMachine(item)
         }
         return filtered.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
     }
 
     private func filteredItems(for filter: CleanupFilterMode, from collection: [PhotoItem]) -> [PhotoItem] {
-        let base = collection.filter { !$0.markedForDeletion && !isPhotoSkipped($0) && isItemInSelectedAlbum($0) }
+        let base = collection.filter { !$0.markedForDeletion && !isPhotoDeferredInTimeMachine($0) && isItemInSelectedAlbum($0) }
         switch filter {
         case .all:
             return base
@@ -1086,14 +1031,6 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         }
     }
 
-    private func shouldFlagForCleanup(_ item: PhotoItem) -> Bool {
-        if item.similarGroupId != nil { return true }
-        if item.isScreenshot || item.isDocumentLike || item.isTextImage { return true }
-        if item.isBlurredOrShaky { return true }
-        if item.isLargeFile && !item.isVideo { return true }
-        return false
-    }
-
     private func isItemInSelectedAlbum(_ item: PhotoItem) -> Bool {
         guard selectedAlbumFilter.collection != nil else { return true }
         guard let ids = selectedAlbumAssetIds else {
@@ -1103,12 +1040,18 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         return ids.contains(item.id)
     }
 
-    private func isPhotoSkipped(_ item: PhotoItem) -> Bool {
-        guard let comps = monthComponents(for: item),
-              let progress = timeMachineProgressStore.progress(year: comps.year, month: comps.month) else {
-            return false
+    private func isPhotoDeferredInTimeMachine(_ item: PhotoItem) -> Bool {
+        guard let comps = monthComponents(for: item) else { return false }
+        let key = monthKey(year: comps.year, month: comps.month)
+        if let progress = timeMachineSnapshots[key],
+           progress.confirmedPhotoIds.contains(item.id) {
+            return true
         }
-        return progress.skippedPhotoIds.contains(item.id)
+        return timeMachineSkippedPhotoIds.contains(item.id)
+    }
+
+    private var timeMachineSkippedPhotoIds: Set<String> {
+        Set(skippedPhotoRecords.filter { $0.source == .timeMachine }.map(\.photoId))
     }
 
     private func monthKey(year: Int, month: Int) -> String {

@@ -1,64 +1,29 @@
 import SwiftUI
-import Photos
 
 struct TimeMachineView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
+    @StateObject private var timelineViewModel: TimeMachineTimelineViewModel
     @State private var showingResetAlert = false
 
-    private var sections: [YearSection] {
-        aggregate(from: viewModel.items)
+    init(viewModel: PhotoCleanupViewModel) {
+        self.viewModel = viewModel
+        _timelineViewModel = StateObject(wrappedValue: TimeMachineTimelineViewModel(dataSource: viewModel))
     }
 
-    private var highlightedMonth: MonthSummary? {
-        sections
-            .flatMap { $0.months }
-            .first { $0.status.needsAttention || $0.isCurrentMonth } ?? sections.first?.months.first
-    }
+    private let squareColumns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 4)
 
     var body: some View {
         NavigationStack {
             ZStack {
-                background
-
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                        Section {
-                            if sections.isEmpty {
-                                EmptyTimelineView()
-                                    .padding(.top, 80)
-                                    .padding(.horizontal, 24)
-                            } else {
-                                VStack(spacing: 28) {
-                                    TimeMachineHeader(onReset: {
-                                        showingResetAlert = true
-                                    })
-                                        .padding(.horizontal, 20)
-                                        .padding(.top, 24)
-
-                                    ForEach(sections) { section in
-                                        YearGroupView(
-                                            section: section,
-                                            featuredMonthID: highlightedMonth?.id,
-                                            onSelectMonth: { summary in
-                                                viewModel.showCleaner(forMonth: summary.year, month: summary.month)
-                                            }
-                                        )
-                                        .padding(.horizontal, 20)
-                                    }
-
-                                }
-                                .padding(.bottom, 60)
-                            }
-                        } header: {
-                            statusBarPlaceholder
-                                .padding(.horizontal, 20)
-                                .padding(.top, 20)
-                                .padding(.bottom, 10)
-                                .background(.thinMaterial)
-                        }
-                    }
+                Color(UIColor.systemGray5)
+                    .opacity(0.35)
+                    .ignoresSafeArea()
+                VStack(spacing: 0) {
+                    header
+                    Divider()
+                        .overlay(Color.gray.opacity(0.15))
+                    content
                 }
-                .ignoresSafeArea(edges: .top)
             }
             .navigationBarHidden(true)
         }
@@ -68,527 +33,309 @@ struct TimeMachineView: View {
                 viewModel.resetTimeMachineProgress()
             }
         } message: {
-            Text("将清除所有月份的整理进度与选择记录，重新开始按月份整理。")
+            Text("将清除待删与已确认记录，重新开始按月份整理。")
         }
+    }
+
+    private var content: some View {
+        Group {
+            if timelineViewModel.sections.isEmpty {
+                EmptyTimelineView()
+                    .padding(.horizontal, 20)
+                    .padding(.top, 60)
+            } else {
+                ScrollView {
+                    VStack(spacing: 32) {
+                        ForEach(timelineViewModel.sections) { section in
+                            VStack(alignment: .leading, spacing: 16) {
+                                MonthGridHeader(
+                                    title: "\(section.year) 年",
+                                    primary: section.year == timelineViewModel.sections.first?.year
+                                )
+                                MonthGridView(section: section, columns: squareColumns) { info in
+                                    viewModel.showCleaner(forMonth: info.year, month: info.month)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 32)
+                    .padding(.top, 16)
+                }
+                .background(Color(UIColor.systemGray6).opacity(0.65))
+            }
+        }
+    }
+
+    private var header: some View {
+        VStack(spacing: 14) {
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("时光机")
+                        .font(.system(size: 28, weight: .bold))
+                    Text("以月份查看待理 / 进行 / 完成状态")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                if FeatureToggles.showCleanupResetControls {
+                    Button {
+                        showingResetAlert = true
+                    } label: {
+                        Label("重置", systemImage: "arrow.counterclockwise")
+                            .font(.footnote.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.white.opacity(0.8))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            HStack(spacing: 16) {
+                YearBadge(text: heroYearLabel)
+                LegendView()
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 20)
+        .padding(.bottom, 12)
+        .background(.ultraThinMaterial)
     }
 }
 
 private extension TimeMachineView {
-    var background: some View {
-        ZStack {
-            Rectangle()
-                .fill(Color.clear)
-                .overlay(
-                    Image("all_album_bg")
-                        .resizable()
-                        .scaledToFill()
-                )
-                .clipped()
-                .opacity(0.18)
-                .blur(radius: 16)
-                .ignoresSafeArea()
-
-            LinearGradient(
-                colors: [
-                    Color(UIColor.systemGray6).opacity(0.95),
-                    Color(UIColor.systemBackground).opacity(0.92)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+    var heroYearLabel: String {
+        if let year = timelineViewModel.sections.first?.year {
+            return "\(year) 年"
         }
-    }
-
-    func aggregate(from items: [PhotoItem]) -> [YearSection] {
-        guard !items.isEmpty else { return [] }
-
-        let formatterCN = DateFormatter()
-        formatterCN.locale = .init(identifier: "zh_CN")
-        formatterCN.dateFormat = "M月"
-
-        let formatterEN = DateFormatter()
-        formatterEN.locale = .init(identifier: "en_US")
-        formatterEN.dateFormat = "MMM"
-
-        let progressFormatter = DateFormatter()
-        progressFormatter.locale = .init(identifier: "zh_CN")
-        progressFormatter.dateFormat = "M月d日"
-
-        let grouped = Dictionary(grouping: items) { (item: PhotoItem) -> String in
-            let date = item.creationDate ?? Date()
-            let comps = Calendar.current.dateComponents([.year, .month], from: date)
-            return "\(comps.year ?? 0)-\(comps.month ?? 0)"
-        }
-
-        let summaries = grouped.compactMap { (key, value) -> MonthSummary? in
-            let parts = key.split(separator: "-")
-            guard parts.count == 2,
-                  let year = Int(parts[0]),
-                  let month = Int(parts[1]),
-                  year > 0, month > 0
-            else { return nil }
-
-            let monthDate = Calendar.current.date(from: DateComponents(year: year, month: month)) ?? Date()
-            let sorted = value.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
-
-            let status = viewModel.monthStatuses[key] ?? viewModel.computeMonthStatus(photos: value)
-            let isCurrentMonth = Calendar.current.isDate(monthDate, equalTo: Date(), toGranularity: .month)
-            let progress = viewModel.timeMachineProgress(year: year, month: month)
-            let processedCount = progress?.processedCount ?? 0
-            var progressDescription: String?
-            if processedCount > 0, !sorted.isEmpty {
-                let cappedCount = min(processedCount, sorted.count)
-                let clampedIndex = min(max(cappedCount - 1, 0), sorted.count - 1)
-                if clampedIndex < sorted.count {
-                    let date = sorted[clampedIndex].creationDate ?? monthDate
-                    let dateText = progressFormatter.string(from: date)
-                    progressDescription = "上次停留：\(dateText) · 已整理 \(cappedCount)/\(sorted.count) 张"
-                }
-            }
-
-            return MonthSummary(
-                id: key,
-                year: year,
-                month: month,
-                monthTitle: formatterCN.string(from: monthDate),
-                englishTitle: formatterEN.string(from: monthDate),
-                totalCount: status.totalPhotos,
-                status: status,
-                isCurrentMonth: isCurrentMonth,
-                sampleItems: Array(sorted.prefix(2)),
-                processedCount: processedCount,
-                progressDescription: progressDescription
-            )
-        }
-        .sorted { lhs, rhs in
-            lhs.year == rhs.year ? lhs.month > rhs.month : lhs.year > rhs.year
-        }
-
-        let groupedByYear = Dictionary(grouping: summaries) { $0.year }
-        return groupedByYear.map { (year, months) in
-            YearSection(year: year, months: months.sorted { $0.month > $1.month })
-        }
-        .sorted { $0.year > $1.year }
+        return "年份"
     }
 }
 
-// MARK: - Header & Highlight
-
-private struct TimeMachineHeader: View {
-    var onReset: () -> Void
+private struct MonthGridHeader: View {
+    let title: String
+    var primary: Bool
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("时光机")
-                    .font(.system(size: 28, weight: .bold))
-                Text("按月份掌握整理节奏")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-            }
-            Spacer()
-            HStack(spacing: 8) {
-                if FeatureToggles.showCleanupResetControls {
-                    Button(action: onReset) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "arrow.counterclockwise.circle")
-                            Text("重置进度")
-                        }
-                        .font(.system(size: 11, weight: .semibold))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color(UIColor.systemGray5))
-                        .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                Button(action: {}) {
-                    HStack(spacing: 6) {
-                        Text("全部时间")
-                            .font(.system(size: 12, weight: .semibold))
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 10, weight: .bold))
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .background(headerButtonBackground)
+        HStack(alignment: .center, spacing: 8) {
+            Text(title)
+                .font(.title3.bold())
+            if primary {
+                Text("当前年份")
+                    .font(.caption.bold())
+                    .foregroundColor(.indigo)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.indigo.opacity(0.08))
                     .clipShape(Capsule())
-                    .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private var headerButtonBackground: Color {
-        Color(UIColor.systemBackground)
-    }
-}
-
-// MARK: - Year & Month Sections
-
-private struct YearGroupView: View {
-    let section: YearSection
-    let featuredMonthID: String?
-    let onSelectMonth: (MonthSummary) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("\(section.year)")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.secondary)
-                .textCase(.uppercase)
-                .padding(.horizontal, 2)
-
-            VStack(spacing: 16) {
-                ForEach(section.months) { month in
-                    MonthCard(
-                        summary: month,
-                        isFeatured: month.id == featuredMonthID,
-                        onTap: { onSelectMonth(month) }
-                    )
-                }
-            }
-        }
-    }
-}
-
-private struct MonthCard: View {
-    let summary: MonthSummary
-    let isFeatured: Bool
-    var onTap: (() -> Void)?
-
-    var body: some View {
-        Group {
-            if isFeatured {
-                FeaturedMonthCard(summary: summary)
             } else {
-                StandardMonthCard(summary: summary)
+                Rectangle()
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(height: 1)
+                    .frame(maxWidth: .infinity)
             }
-        }
-        .contentShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-        .onTapGesture {
-            guard canTriggerAction else { return }
-            onTap?()
-        }
-        .opacity(canTriggerAction ? 1 : 0.8)
-    }
-
-    private var canTriggerAction: Bool {
-        !summary.status.userCleaned || summary.isCurrentMonth
-    }
-}
-
-private struct MonthBadge: View {
-    let month: Int
-    let englishTitle: String
-    let highlighted: Bool
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(highlighted ? Color("brand-start").opacity(0.18) : Color(UIColor.secondarySystemBackground))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(Color.black.opacity(highlighted ? 0.15 : 0.08), lineWidth: 0.8)
-                )
-                .shadow(color: Color.black.opacity(0.08), radius: 3, y: 1)
-            VStack(spacing: 3) {
-                Text(String(format: "%02d", month))
-                    .font(.system(size: 18, weight: .bold))
-                Text(englishTitle.uppercased())
-                    .font(.system(size: 9, weight: .semibold))
-            }
-            .foregroundColor(highlighted ? Color("brand-start") : .primary)
-        }
-        .frame(width: 52, height: 56)
-    }
-}
-
-private struct FeaturedMonthCard: View {
-    let summary: MonthSummary
-
-    private var status: MonthStatus { summary.status }
-
-    private var metrics: [TimelineMetric] {
-        if status.userCleaned {
-            return [TimelineMetric(color: Color.green.opacity(0.85), ratio: 1)]
-        }
-
-        let total = max(Double(status.totalPhotos), 1)
-        let pending = min(Double(status.predictedPendingCount), total)
-        let remaining = max(total - pending, 0)
-        let review = remaining * 0.4
-        let good = max(remaining - review, 0)
-
-        let computed = [
-            TimelineMetric(color: Color.yellow.opacity(0.9), ratio: pending / total),
-            TimelineMetric(color: Color.green.opacity(0.8), ratio: review / total),
-            TimelineMetric(color: Color.white.opacity(0.35), ratio: good / total)
-        ].filter { $0.ratio > 0 }
-
-        if computed.isEmpty {
-            return [TimelineMetric(color: Color.white.opacity(0.2), ratio: 1)]
-        }
-        return computed
-    }
-
-    var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color("brand-start"), Color("brand-end")],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-            .shadow(color: Color("brand-start").opacity(0.25), radius: 24, y: 12)
-            .overlay(
-                Circle()
-                    .fill(Color.white.opacity(0.1))
-                    .frame(width: 180, height: 180)
-                    .offset(x: 110, y: -90)
-            )
-
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 8) {
-                            Text(summary.monthTitle)
-                                .font(.system(size: 32, weight: .bold))
-                            if summary.isCurrentMonth {
-                                Text("Current")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(Color.white.opacity(0.18))
-                                    .clipShape(Capsule())
-                            }
-                        }
-                        .foregroundColor(.white)
-
-                        Text("本月拍摄 \(summary.totalCount) 张")
-                            .font(.system(size: 12))
-                            .foregroundColor(.white.opacity(0.85))
-                        
-                        if let progressText = summary.progressDescription {
-                            Text(progressText)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(Color.white.opacity(0.85))
-                                .padding(.top, 2)
-                        }
-                    }
-
-                    Spacer()
-
-                    if status.userCleaned {
-                        HStack(spacing: 6) {
-                            Text("已清理")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.white)
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.white)
-                                .font(.system(size: 14, weight: .bold))
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Color.white.opacity(0.18))
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    } else {
-                        VStack(alignment: .trailing, spacing: 2) {
-                            HStack(spacing: 4) {
-                                Text("\(status.predictedPendingCount)")
-                                    .font(.system(size: 24, weight: .bold))
-                                    .foregroundColor(.yellow)
-                                Text("待清理")
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundColor(.white.opacity(0.9))
-                            }
-                            Text("查看详情")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.white.opacity(0.7))
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(Color.white.opacity(0.18))
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                        )
-                    }
-                }
-
-                MultiSegmentProgressBar(segments: metrics)
-                    .frame(height: 6)
-
-                HStack {
-                    Text(status.userCleaned ? "整理完成" : "相似 / 截图 / 模糊")
-                    Spacer()
-                    Text(status.userCleaned ? "等待新照片" : "良好照片")
-                }
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.white.opacity(0.75))
-            }
-            .padding(22)
-        }
-    }
-}
-
-private struct StandardMonthCard: View {
-    let summary: MonthSummary
-
-    private var status: MonthStatus { summary.status }
-
-    private var shouldShowPending: Bool {
-        !status.userCleaned && (status.predictedPendingCount > 0 || summary.isCurrentMonth)
-    }
-
-    var body: some View {
-        HStack(spacing: 16) {
-            MonthBadge(
-                month: summary.month,
-                englishTitle: summary.englishTitle,
-                highlighted: shouldShowPending
-            )
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(summary.monthTitle)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.primary)
-                Text("拍摄 \(summary.totalCount) 张")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                if let progressText = summary.progressDescription {
-                    Text(progressText)
-                        .font(.system(size: 11))
-                        .foregroundColor(Color("brand-start"))
-                }
-            }
-
             Spacer()
-
-            if shouldShowPending {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("\(status.predictedPendingCount)")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(.primary)
-                    Text("待处理")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(Color("brand-start"))
-                }
-                .padding(.trailing, 4)
-            } else if status.userCleaned {
-                HStack(spacing: 6) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 14, weight: .bold))
-                    Text("已清理")
-                        .font(.system(size: 12, weight: .semibold))
-                }
-                .foregroundColor(Color("brand-start"))
-            } else {
-                HStack(spacing: 6) {
-                    Image(systemName: "hand.thumbsup")
-                        .font(.system(size: 12, weight: .bold))
-                    Text("状态良好")
-                        .font(.system(size: 10, weight: .bold))
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color(UIColor.systemGray5))
-                .foregroundColor(.secondary)
-                .clipShape(Capsule())
-            }
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundColor(.secondary.opacity(0.5))
         }
-        .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .fill(Color(UIColor.secondarySystemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.06), radius: 8, y: 4)
+        .padding(.horizontal, 4)
     }
 }
 
-private struct TimelineMetric: Identifiable {
-    let id = UUID()
-    let color: Color
-    let ratio: Double
-}
-
-private struct MultiSegmentProgressBar: View {
-    let segments: [TimelineMetric]
+private struct MonthGridView: View {
+    let section: TimeMachineTimelineViewModel.YearSection
+    let columns: [GridItem]
+    var onSelect: (MonthInfo) -> Void
 
     var body: some View {
-        GeometryReader { proxy in
-            HStack(spacing: 4) {
-                ForEach(segments) { segment in
-                    RoundedRectangle(cornerRadius: 999, style: .continuous)
-                        .fill(segment.color)
-                        .frame(width: max(CGFloat(segment.ratio) * proxy.size.width, 4))
+        LazyVGrid(columns: columns, spacing: 12) {
+            ForEach(section.months) { info in
+                MonthSquare(info: info) {
+                    onSelect(info)
                 }
             }
         }
     }
 }
 
-// MARK: - Models & Empty State
+private struct MonthSquare: View {
+    let info: MonthInfo
+    var onTap: () -> Void
 
-private struct MonthSummary: Identifiable {
-    let id: String
-    let year: Int
-    let month: Int
-    let monthTitle: String
-    let englishTitle: String
-    let totalCount: Int
-    let status: MonthStatus
-    let isCurrentMonth: Bool
-    let sampleItems: [PhotoItem]
-    let processedCount: Int
-    let progressDescription: String?
+    private struct Palette {
+        let border: Color
+        let background: Color
+        let text: Color
+        let glow: Color
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(palette.background)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(palette.border, lineWidth: 2)
+                    )
+                    .shadow(color: palette.glow, radius: 8, x: 0, y: 0)
+                VStack(spacing: 6) {
+                    Text(monthLabel)
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundColor(palette.text)
+
+                    switch info.status {
+                    case .notStarted:
+                        Text(info.totalPhotos > 0 ? "\(info.totalPhotos) 张" : "未开始")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(palette.text.opacity(0.65))
+                            .frame(height: 12)
+                    case .inProgress:
+                        InProgressBadge(progress: info.progress)
+                    case .completed:
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(palette.text.opacity(0.7))
+                            .frame(height: 12)
+                    }
+                }
+                .padding(6)
+            }
+            .aspectRatio(1, contentMode: .fit)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var monthLabel: String {
+        "\(info.month)"
+    }
+
+    private var palette: Palette {
+        switch info.status {
+        case .notStarted:
+            return Palette(
+                border: Color.indigo.opacity(0.85),
+                background: Color.white,
+                text: Color.indigo,
+                glow: Color.indigo.opacity(0.12)
+            )
+        case .inProgress:
+            return Palette(
+                border: Color.orange.opacity(0.9),
+                background: Color.white,
+                text: Color.orange,
+                glow: Color.orange.opacity(0.15)
+            )
+        case .completed:
+            return Palette(
+                border: Color.gray.opacity(0.3),
+                background: Color.gray.opacity(0.15),
+                text: Color.gray,
+                glow: Color.clear
+            )
+        }
+    }
+
 }
 
-private struct YearSection: Identifiable {
-    let year: Int
-    let months: [MonthSummary]
+private struct InProgressBadge: View {
+    let progress: Double
 
-    var id: Int { year }
+    var body: some View {
+        let clamped = min(max(progress, 0), 1)
+        ZStack {
+            Circle()
+                .stroke(Color.orange.opacity(0.25), lineWidth: 3)
+                .frame(width: 28, height: 28)
+            Circle()
+                .trim(from: 0, to: CGFloat(clamped))
+                .stroke(Color.orange, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .frame(width: 28, height: 28)
+                .rotationEffect(.degrees(-90))
+            Text("\(Int(round(clamped * 100)))%")
+                .font(.system(size: 7.5, weight: .bold, design: .rounded))
+                .foregroundColor(.orange)
+        }
+        .frame(height: 28)
+    }
+}
+
+private struct YearBadge: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(text)
+                .font(.title3.bold())
+            Image(systemName: "chevron.down")
+                .font(.caption)
+                .foregroundColor(.gray)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.9))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.gray.opacity(0.12))
+        )
+    }
+}
+
+private struct LegendView: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            LegendItem(color: Color.indigo, text: "待理")
+            LegendItem(color: Color.orange, text: "进行")
+            LegendItem(color: Color.gray, text: "完成")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.white.opacity(0.8))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.gray.opacity(0.1))
+        )
+    }
+}
+
+private struct LegendItem: View {
+    let color: Color
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .stroke(color, lineWidth: 2)
+                .frame(width: 10, height: 10)
+            Text(text)
+                .font(.caption2.weight(.bold))
+                .foregroundColor(.secondary)
+        }
+    }
 }
 
 private struct EmptyTimelineView: View {
     var body: some View {
         VStack(spacing: 14) {
-            Image(systemName: "calendar.badge.exclamationmark")
+            Image(systemName: "calendar.badge.questionmark")
                 .font(.system(size: 52))
                 .foregroundColor(.secondary)
-            Text("暂无可展示的时间线")
+            Text("暂无可展示的月份")
                 .font(.headline)
-            Text("当您完成一次整理或开放照片权限后，这里会按月份呈现精彩回忆。")
+            Text("完成一次整理或开放照片权限后，这里会按月份呈现状态。")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
+                .padding(.horizontal, 32)
         }
-        .frame(maxWidth: .infinity, minHeight: 400)
-    }
-}
-
-private extension TimeMachineView {
-    var statusBarPlaceholder: some View {
-        HStack {
-            Spacer()
-            Text("时光机")
-                .font(.system(size: 28, weight: .bold))
-                .foregroundColor(.clear)
-            Spacer()
-        }
+        .frame(maxWidth: .infinity, minHeight: 360)
+        .background(
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(Color.white.opacity(0.7))
+                .shadow(color: Color.black.opacity(0.05), radius: 15, x: 0, y: 8)
+        )
     }
 }
