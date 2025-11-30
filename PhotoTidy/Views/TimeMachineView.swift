@@ -166,26 +166,27 @@ private struct MonthSquare: View {
     var onTap: () -> Void
 
     private struct Palette {
-        let border: Color
         let background: Color
         let text: Color
-        let glow: Color
+        let baseBorder: Color
+        let progressBorder: Color?
     }
 
     var body: some View {
         Button(action: onTap) {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+            shape
                 .fill(palette.background)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(palette.border, lineWidth: 1.5)
+                    shape.stroke(palette.baseBorder, lineWidth: 2)
                 )
+                .overlay(progressOverlay(for: shape))
                 .overlay(
                     Text(monthLabel)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(palette.text)
                 )
-                .frame(height: 48)
+                .aspectRatio(1, contentMode: .fit)
         }
         .buttonStyle(.plain)
     }
@@ -198,24 +199,24 @@ private struct MonthSquare: View {
         switch displayStatus {
         case .notStarted:
             return Palette(
-                border: Color.indigo.opacity(0.85),
                 background: Color.white,
                 text: Color.indigo,
-                glow: Color.indigo.opacity(0.12)
+                baseBorder: Color.indigo.opacity(0.95),
+                progressBorder: nil
             )
         case .inProgress:
             return Palette(
-                border: Color.orange.opacity(0.9),
                 background: Color.white,
                 text: Color.orange,
-                glow: Color.orange.opacity(0.15)
+                baseBorder: Color.gray.opacity(0.25),
+                progressBorder: Color.orange.opacity(0.95)
             )
         case .completed:
             return Palette(
-                border: Color.green.opacity(0.45),
-                background: Color.green.opacity(0.12),
-                text: Color.green,
-                glow: Color.green.opacity(0.08)
+                background: Color(.displayP3, red: 0.93, green: 0.98, blue: 0.94, opacity: 1),
+                text: Color(.displayP3, red: 0.23, green: 0.73, blue: 0.51, opacity: 1),
+                baseBorder: Color.clear,
+                progressBorder: nil
             )
         }
     }
@@ -225,6 +226,24 @@ private struct MonthSquare: View {
             return .completed
         }
         return info.status
+    }
+
+    private var progressValue: Double {
+        guard info.totalPhotos > 0 else { return 0 }
+        let ratio = Double(info.processedCount) / Double(info.totalPhotos)
+        return min(max(ratio, 0), 1)
+    }
+
+    @ViewBuilder
+    private func progressOverlay(for shape: RoundedRectangle) -> some View {
+        if let color = palette.progressBorder {
+            shape
+                .trim(from: 0, to: CGFloat(progressValue))
+                .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        } else {
+            EmptyView()
+        }
     }
 }
 
