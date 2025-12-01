@@ -81,14 +81,16 @@ struct MonthCard: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Text("\(meta.month) 月")
-                .font(.headline)
+            HStack(alignment: .bottom, spacing: 2) {
+                Text("\(meta.month)")
+                    .font(.system(size: 20, weight: .bold))
+                Text("月")
+                    .font(.system(size: 11, weight: .medium))
+                    .baselineOffset(-1)
+            }
             Text("Total: \(meta.totalPhotos)")
                 .font(.caption2)
                 .foregroundColor(.secondary)
-            Text(meta.status.title)
-                .font(.caption)
-                .foregroundColor(color)
             ProgressView(value: meta.progress)
                 .progressViewStyle(.linear)
         }

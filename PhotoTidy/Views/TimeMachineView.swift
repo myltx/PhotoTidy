@@ -213,9 +213,19 @@ private struct MonthSquare: View {
                 )
                 .overlay(progressOverlay(for: shape))
                 .overlay(
-                    Text(monthLabel)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(palette.text)
+                    VStack(spacing: 4) {
+                        Spacer()
+                        HStack(alignment: .bottom, spacing: 2) {
+                            Text("\(info.month)")
+                                .font(.system(size: 20, weight: .bold))
+                                .foregroundColor(palette.text)
+                            Text("月")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(palette.text.opacity(0.8))
+                                .baselineOffset(-1)
+                        }
+                    }
+                    .padding(.bottom, 12)
                 )
                 .aspectRatio(1, contentMode: .fit)
         }
@@ -289,6 +299,7 @@ private struct MonthSquare: View {
             EmptyView()
         }
     }
+
 }
 
 private struct YearBadge: View {
