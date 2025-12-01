@@ -20,7 +20,7 @@ SwiftUI View → ViewModel (PhotoCleanup / Timeline / Modules)
 
 | 组件 | 说明 | 关键文件 |
 | --- | --- | --- |
-| `MetadataRepository` | 读取 PhotoKit 元数据、合并 `PhotoAnalysisCacheStore` 结果，输出 `MetadataSnapshot`。 | `PhotoTidy/DataLayer/Metadata/MetadataRepository.swift` |
+| `MetadataRepository` | 读取 PhotoKit 元数据、合并 `PhotoAnalysisCacheStore` 结果，输出 `MetadataSnapshot`。缓存中新增 `monthMomentIdentifiers` 字段，映射 `year-month` → `PHAssetCollection`（Moment）集合，确保与系统相册“时光”一致。 | `PhotoTidy/DataLayer/Metadata/MetadataRepository.swift` |
 | `MetadataCacheStore` | actor, JSON 原子写，字段：`totalCount`、`monthTotals`、`CategoryCounters`、`DeviceStorageUsage`。 | `PhotoTidy/DataLayer/Metadata/MetadataCacheStore.swift` |
 | `PhotoRepository` | actor，负责按 Scope（全部/月度/相册）维护 `PHFetchResult`，提供分页 `fetchNextBatch`、`prefetchMonth`、`assets(for:)`。 | `PhotoTidy/DataLayer/PhotoRepository.swift` |
 | `ImagePipeline` | 包装 `PHCachingImageManager`，提供 `requestImage`、`prefetch/stopPrefetching`、`cancelAll`，内部联合 `NSCache` 与 `ImageDiskCache`。 | `PhotoTidy/DataLayer/ImagePipeline` |
@@ -35,7 +35,7 @@ SwiftUI View → ViewModel (PhotoCleanup / Timeline / Modules)
 - **大文件**：`MetadataRepository` 只依赖 `estimatedAssetByteCount` 统计；真实文件仅在需要预览/操作时取。
 - **模糊检测**：重任务挂在 `BackgroundJobScheduler` 的 `.similarity` 作业里，通过 `scheduleBackgroundAnalysisIfNeeded` 分批执行，可随 TaskPool 取消。
 - **截图/文档**：首屏使用 `MetadataSnapshot` 的 screenshot/document 计数，进入列表时才加载真实 `PhotoItem`。
-- **时光机**：`MonthAssetTotals` 由 `MetadataRepository` 填充，`TimeMachineTimelineViewModel` 立刻拿到月份状态；进入某月时 `PhotoRepository.prefetchMonth` 分批加载并可随 `TaskPool` 取消。
+- **时光机**：`MetadataRepository` 额外缓存 `monthMomentIdentifiers`，因此 TimeMachine 卡片能直接复用系统 Moment（与苹果相册一致）。进入月份优先通过 `PhotoRepository.fetchAssets(forMomentIdentifiers:)` 取真实图片，只有缺失 moment 时才回退到 `creationDate` 谓词。`TaskPool` 负责取消未完成的月份预取。
 
 ## 4. ViewModel 调整
 
@@ -50,7 +50,7 @@ SwiftUI View → ViewModel (PhotoCleanup / Timeline / Modules)
 
 - `PhotoLoader` 继续负责分页，但当零延迟模式启用时只在真正需要时启动。
 - `ImagePipeline` 将 `targetSize` × `UIScreen.scale` 后统一请求，并通过 `ImageDiskCache` (LRU) + `NSCache` 管理缓存。
-- `prefetchMonthAssetsIfNeeded` 在后台 actor 中调用 `PhotoRepository` 获取本月前 400 张 `PHAsset`，随后交给 `ImagePipeline.prefetch`，并把 Task 存放进 `TaskPool`，可按月份取消。
+- `prefetchMonthAssetsIfNeeded` 优先基于 `MetadataSnapshot.monthMomentIdentifiers` 调用 `PhotoRepository.fetchAssets(forMomentIdentifiers:)`，确保与系统“时光”一致；若该月份尚未生成 moment，则回退到 `prefetchMonth`。之后交给 `ImagePipeline.prefetch` 并注册到 `TaskPool`，可按月份取消。
 
 ## 6. 分批加载 / 可取消代码示例
 

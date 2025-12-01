@@ -124,11 +124,14 @@ final class MetadataRepository: NSObject, ObservableObject, PHPhotoLibraryChange
             }
             .map { MetadataSnapshot.MonthTotal(year: $0.year, month: $0.month, total: $0.total) }
 
+        let momentIndex = buildMonthMomentIndex()
+
         let snapshot = MetadataSnapshot(
             schemaVersion: MetadataSnapshot.schemaVersion,
             generatedAt: Date(),
             totalCount: fetchResult.count,
             monthTotals: monthTotals,
+            monthMomentIdentifiers: momentIndex,
             categoryCounters: counters,
             deviceStorageUsage: DeviceStorageUsage.current(),
             cachedAnalysisVersion: PhotoAnalysisCacheEntry.currentVersion,
@@ -153,6 +156,20 @@ private extension MetadataRepository {
     }
 
     static let largeFileThreshold = 15 * 1_024 * 1_024
+
+    func buildMonthMomentIndex() -> [String: [String]] {
+        var index: [String: [String]] = [:]
+        let calendar = Calendar.current
+        let collections = PHAssetCollection.fetchAssetCollections(with: .moment, subtype: .any, options: nil)
+        collections.enumerateObjects { collection, _, _ in
+            guard let start = collection.startDate ?? collection.endDate else { return }
+            let comps = calendar.dateComponents([.year, .month], from: start)
+            guard let year = comps.year, let month = comps.month else { return }
+            let key = "\(year)-\(month)"
+            index[key, default: []].append(collection.localIdentifier)
+        }
+        return index
+    }
 
     func estimatedSize(for asset: PHAsset) -> Int {
         let resources = PHAssetResource.assetResources(for: asset)

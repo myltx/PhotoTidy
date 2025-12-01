@@ -97,6 +97,33 @@ actor PhotoRepository {
         return collectDescriptors(from: result, range: 0..<clampedLimit)
     }
 
+    func fetchAssets(
+        forMomentIdentifiers identifiers: [String],
+        limit: Int?
+    ) async -> [AssetDescriptor] {
+        await bootstrapLibraryIfNeeded()
+        guard !identifiers.isEmpty else { return [] }
+        let collections = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: identifiers, options: nil)
+        var descriptors: [AssetDescriptor] = []
+        var seen = Set<String>()
+        let assetOptions = PHFetchOptions()
+        assetOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+
+        collections.enumerateObjects { collection, _, stop in
+            let assets = PHAsset.fetchAssets(in: collection, options: assetOptions)
+            assets.enumerateObjects { asset, _, stopAssets in
+                if seen.contains(asset.localIdentifier) { return }
+                descriptors.append(AssetDescriptor(asset: asset))
+                seen.insert(asset.localIdentifier)
+                if let limit, descriptors.count >= limit {
+                    stopAssets.pointee = true
+                    stop.pointee = true
+                }
+            }
+        }
+        return descriptors
+    }
+
     func assets(for identifiers: [String]) async -> [PHAsset] {
         guard !identifiers.isEmpty else { return [] }
         let result = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)

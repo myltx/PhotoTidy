@@ -495,8 +495,20 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             refreshSession()
         } else if activeMonthContext == nil {
             appendIncomingToSession(newItems: incoming)
+        } else if let context = activeMonthContext,
+                  incomingContainsItems(forYear: context.year, month: context.month, items: incoming) {
+            rebuildMonthSession(year: context.year, month: context.month)
         }
         scheduleBackgroundAnalysisIfNeeded()
+    }
+
+    private func incomingContainsItems(forYear year: Int, month: Int, items: [PhotoItem]) -> Bool {
+        let calendar = Calendar.current
+        return items.contains { item in
+            guard let date = item.creationDate else { return false }
+            let comps = calendar.dateComponents([.year, .month], from: date)
+            return comps.year == year && comps.month == month
+        }
     }
 
     private func appendIncomingToSession(newItems: [PhotoItem]) {
@@ -818,7 +830,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             asset: asset,
             pixelSize: CGSize(width: asset.pixelWidth, height: asset.pixelHeight),
             fileSize: estimatedSize,
-            creationDate: asset.creationDate,
+            creationDate: asset.creationDate ?? asset.modificationDate,
             isVideo: asset.mediaType == .video,
             isScreenshot: asset.mediaSubtypes.contains(.photoScreenshot),
             pHash: nil,
@@ -1099,7 +1111,8 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     }
 
     private func monthComponents(for item: PhotoItem) -> (year: Int, month: Int)? {
-        guard let date = item.creationDate else { return nil }
+        let date = item.creationDate ?? item.asset.creationDate ?? item.asset.modificationDate
+        guard let date else { return nil }
         let comps = Calendar.current.dateComponents([.year, .month], from: date)
         guard let year = comps.year, let month = comps.month else { return nil }
         return (year, month)
@@ -1323,7 +1336,13 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
         if FeatureToggles.enableZeroLatencyPipeline {
             let task = Task<Void, Never> { [weak self] in
                 guard let self else { return }
-                let descriptors = await self.photoRepository.prefetchMonth(year, month: month, limit: 400)
+                let momentIds = self.metadataSnapshot.monthMomentIdentifiers[key] ?? []
+                let descriptors: [AssetDescriptor]
+                if !momentIds.isEmpty {
+                    descriptors = await self.photoRepository.fetchAssets(forMomentIdentifiers: momentIds, limit: 400)
+                } else {
+                    descriptors = await self.photoRepository.prefetchMonth(year, month: month, limit: 400)
+                }
                 guard !Task.isCancelled else { return }
                 let assets = descriptors.map(\.asset)
                 await MainActor.run {
