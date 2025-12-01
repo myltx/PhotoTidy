@@ -126,11 +126,12 @@ private extension TimeMachineView {
 private extension TimeMachineView {
     var displayedSections: [TimeMachineTimelineViewModel.YearSection] {
         if FeatureToggles.useZeroLatencyTimeMachine {
-            return zeroLatencyTimelineViewModel.sections.map {
+            let raw = zeroLatencyTimelineViewModel.sections.map {
                 TimeMachineTimelineViewModel.YearSection(year: $0.year, months: $0.months)
             }
+            return normalizedSections(from: raw)
         } else {
-            return timelineViewModel.sections
+            return normalizedSections(from: timelineViewModel.sections)
         }
     }
 
@@ -145,6 +146,34 @@ private extension TimeMachineView {
         } else {
             viewModel.showCleaner(forMonth: info.year, month: info.month)
         }
+    }
+
+    func normalizedSections(from sections: [TimeMachineTimelineViewModel.YearSection]) -> [TimeMachineTimelineViewModel.YearSection] {
+        guard !sections.isEmpty else { return [] }
+        var normalized: [TimeMachineTimelineViewModel.YearSection] = []
+        let years = sections.map(\.year).sorted(by: >)
+        let sectionMap = Dictionary(uniqueKeysWithValues: sections.map { ($0.year, $0.months) })
+        for year in years {
+            let months = sectionMap[year] ?? []
+            let monthMap = Dictionary(uniqueKeysWithValues: months.map { ($0.month, $0) })
+            var filled: [MonthInfo] = []
+            for month in 1...12 {
+                if let info = monthMap[month] {
+                    filled.append(info)
+                } else {
+                    filled.append(MonthInfo(
+                        year: year,
+                        month: month,
+                        totalPhotos: 0,
+                        skippedCount: 0,
+                        pendingDeleteCount: 0,
+                        confirmedCount: 0
+                    ))
+                }
+            }
+            normalized.append(TimeMachineTimelineViewModel.YearSection(year: year, months: filled))
+        }
+        return normalized
     }
 }
 
@@ -199,6 +228,7 @@ private struct MonthSquare: View {
     private struct Palette {
         let background: Color
         let text: Color
+        let unitText: Color
         let baseBorder: Color
         let progressBorder: Color?
     }
@@ -206,6 +236,7 @@ private struct MonthSquare: View {
     var body: some View {
         Button(action: onTap) {
             let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+            
             shape
                 .fill(palette.background)
                 .overlay(
@@ -221,7 +252,7 @@ private struct MonthSquare: View {
                                 .foregroundColor(palette.text)
                             Text("月")
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(palette.text.opacity(0.8))
+                                .foregroundColor(palette.unitText)
                                 .baselineOffset(-1)
                         }
                     }
@@ -230,7 +261,7 @@ private struct MonthSquare: View {
                 .aspectRatio(1, contentMode: .fit)
         }
         .buttonStyle(.plain)
-        .disabled(!info.hasContent)
+        .disabled(!info.hasContent && !FeatureToggles.useZeroLatencyTimeMachine)
     }
 
     private var monthLabel: String {
@@ -242,29 +273,33 @@ private struct MonthSquare: View {
         case .notStarted:
             if !info.hasContent {
                 return Palette(
-                    background: Color(UIColor.systemGray6),
-                    text: Color.gray.opacity(0.6),
-                    baseBorder: Color.gray.opacity(0.2),
+                    background: Color.green.opacity(0.08),
+                    text: Color.green.opacity(0.65),
+                    unitText: Color.green.opacity(0.55),
+                    baseBorder: Color.clear,
                     progressBorder: nil
                 )
             }
             return Palette(
                 background: Color.white,
-                text: Color.indigo,
-                baseBorder: Color.indigo.opacity(0.95),
-                progressBorder: nil
-            )
-        case .inProgress:
-            return Palette(
-                background: Color.white,
-                text: Color.orange,
-                baseBorder: Color.gray.opacity(0.25),
-                progressBorder: Color.orange.opacity(0.95)
-            )
+            text: Color.indigo,
+            unitText: Color.indigo.opacity(0.7),
+            baseBorder: Color.indigo.opacity(0.95),
+            progressBorder: nil
+        )
+    case .inProgress:
+        return Palette(
+            background: Color.white,
+            text: Color.orange,
+            unitText: Color.orange.opacity(0.7),
+            baseBorder: Color.gray.opacity(0.25),
+            progressBorder: Color.orange.opacity(0.95)
+        )
         case .completed:
             return Palette(
-                background: Color(.displayP3, red: 0.93, green: 0.98, blue: 0.94, opacity: 1),
-                text: Color(.displayP3, red: 0.23, green: 0.73, blue: 0.51, opacity: 1),
+                background: Color.green.opacity(0.12),
+                text: Color.green,
+                unitText: Color.green.opacity(0.75),
                 baseBorder: Color.clear,
                 progressBorder: nil
             )
