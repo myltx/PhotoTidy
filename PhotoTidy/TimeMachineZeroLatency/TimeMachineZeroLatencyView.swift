@@ -76,13 +76,16 @@ private struct PermissionPrompt: View {
     }
 }
 
-private struct MonthCard: View {
+struct MonthCard: View {
     let meta: MonthInfo
 
     var body: some View {
         VStack(spacing: 8) {
             Text("\(meta.month) 月")
                 .font(.headline)
+            Text("Total: \(meta.totalPhotos)")
+                .font(.caption2)
+                .foregroundColor(.secondary)
             Text(meta.status.title)
                 .font(.caption)
                 .foregroundColor(color)
@@ -104,7 +107,7 @@ private struct MonthCard: View {
     }
 }
 
-private struct TimeMachineMonthDetailView: View {
+struct TimeMachineMonthDetailView: View {
     @StateObject var viewModel: TimeMachineMonthDetailViewModel
 
     var body: some View {

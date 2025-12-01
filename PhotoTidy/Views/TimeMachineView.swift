@@ -4,6 +4,7 @@ struct TimeMachineView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
     @StateObject private var timelineViewModel: TimeMachineTimelineViewModel
     @State private var showingResetAlert = false
+    @StateObject private var zeroLatencyTimelineViewModel = TimeMachineZeroLatencyViewModel()
 
     init(viewModel: PhotoCleanupViewModel) {
         self.viewModel = viewModel
@@ -13,54 +14,55 @@ struct TimeMachineView: View {
     private let squareColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 6)
 
     var body: some View {
-        if FeatureToggles.useZeroLatencyTimeMachine {
-            TimeMachineZeroLatencyContainerView()
-        } else {
-            NavigationStack {
-                ZStack {
-                    Color(UIColor.systemGray5)
-                        .opacity(0.35)
-                        .ignoresSafeArea()
-                    VStack(spacing: 0) {
-                        header
-                        Divider()
-                            .overlay(Color.gray.opacity(0.15))
-                        content
-                    }
+        NavigationStack {
+            ZStack {
+                Color(UIColor.systemGray5)
+                    .opacity(0.35)
+                    .ignoresSafeArea()
+                VStack(spacing: 0) {
+                    header
+                    Divider()
+                        .overlay(Color.gray.opacity(0.15))
+                    content
                 }
-                .navigationBarHidden(true)
             }
-            .alert("重置时光机进度？", isPresented: $showingResetAlert) {
-                Button("取消", role: .cancel) {}
-                Button("重置", role: .destructive) {
-                    viewModel.resetTimeMachineProgress()
-                }
-            } message: {
-                Text("将清除待删与已确认记录，重新开始按月份整理。")
+            .navigationBarHidden(true)
+        }
+        .alert("重置时光机进度？", isPresented: $showingResetAlert) {
+            Button("取消", role: .cancel) {}
+            Button("重置", role: .destructive) {
+                viewModel.resetTimeMachineProgress()
+            }
+        } message: {
+            Text("将清除待删与已确认记录，重新开始按月份整理。")
+        }
+        .onAppear {
+            if FeatureToggles.useZeroLatencyTimeMachine {
+                zeroLatencyTimelineViewModel.onAppear()
             }
         }
     }
 
     private var content: some View {
         Group {
-            if timelineViewModel.sections.isEmpty {
+            if displayedSections.isEmpty {
                 EmptyTimelineView()
                     .padding(.horizontal, 20)
                     .padding(.top, 60)
             } else {
                 ScrollView {
                     VStack(spacing: 24) {
-                        ForEach(timelineViewModel.sections) { section in
-                            VStack(alignment: .leading, spacing: 10) {
-                                MonthGridHeader(
-                                    title: "\(section.year) 年",
-                                    primary: section.year == timelineViewModel.sections.first?.year
-                                )
-                                MonthGridView(section: section, columns: squareColumns) { info in
-                                    viewModel.showCleaner(forMonth: info.year, month: info.month)
-                                }
+                    ForEach(displayedSections) { section in
+                        VStack(alignment: .leading, spacing: 10) {
+                            MonthGridHeader(
+                                title: "\(section.year) 年",
+                                primary: section.year == displayedSections.first?.year
+                            )
+                            MonthGridView(section: section, columns: squareColumns) { info in
+                                handleMonthSelection(info)
                             }
                         }
+                    }
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 20)
@@ -114,10 +116,35 @@ struct TimeMachineView: View {
 
 private extension TimeMachineView {
     var heroYearLabel: String {
-        if let year = timelineViewModel.sections.first?.year {
+        if let year = displayedSections.first?.year {
             return "\(year) 年"
         }
         return "年份"
+    }
+}
+
+private extension TimeMachineView {
+    var displayedSections: [TimeMachineTimelineViewModel.YearSection] {
+        if FeatureToggles.useZeroLatencyTimeMachine {
+            return zeroLatencyTimelineViewModel.sections.map {
+                TimeMachineTimelineViewModel.YearSection(year: $0.year, months: $0.months)
+            }
+        } else {
+            return timelineViewModel.sections
+        }
+    }
+
+    func handleMonthSelection(_ info: MonthInfo) {
+        if FeatureToggles.useZeroLatencyTimeMachine {
+            Task { @MainActor in
+                let success = await zeroLatencyTimelineViewModel.prepareSession(for: info)
+                if !success {
+                    viewModel.showCleaner(forMonth: info.year, month: info.month)
+                }
+            }
+        } else {
+            viewModel.showCleaner(forMonth: info.year, month: info.month)
+        }
     }
 }
 

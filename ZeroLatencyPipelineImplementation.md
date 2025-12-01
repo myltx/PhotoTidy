@@ -35,7 +35,7 @@ SwiftUI View → ViewModel (PhotoCleanup / Timeline / Modules)
 - **大文件**：`MetadataRepository` 只依赖 `estimatedAssetByteCount` 统计；真实文件仅在需要预览/操作时取。
 - **模糊检测**：重任务挂在 `BackgroundJobScheduler` 的 `.similarity` 作业里，通过 `scheduleBackgroundAnalysisIfNeeded` 分批执行，可随 TaskPool 取消。
 - **截图/文档**：首屏使用 `MetadataSnapshot` 的 screenshot/document 计数，进入列表时才加载真实 `PhotoItem`。
-- **时光机**：`MetadataRepository` 额外缓存 `monthMomentIdentifiers`，因此 TimeMachine 卡片能直接复用系统 Moment（与苹果相册一致）。进入月份优先通过 `PhotoRepository.fetchAssets(forMomentIdentifiers:)` 取真实图片，只有缺失 moment 时才回退到 `creationDate` 谓词。`TaskPool` 负责取消未完成的月份预取。
+- **时光机**：`MetadataRepository` 额外缓存 `monthMomentIdentifiers`，因此 TimeMachine 卡片能直接复用系统 Moment（与苹果相册一致）。进入月份优先通过 `PhotoRepository.fetchAssets(forMomentIdentifiers:)` 取真实图片，只有缺失 moment 时才回退到 `creationDate` 谓词。`TaskPool` 负责取消未完成的月份预取；在旧 UI 中点击月份时会调用零延迟 Detail VM 把 asset id 注入 `PhotoCleanupViewModel.prepareSession`，从而沿用原有「滑动跳过/确认/待删」交互但无加载延迟。
 
 ## 4. ViewModel 调整
 
@@ -50,7 +50,7 @@ SwiftUI View → ViewModel (PhotoCleanup / Timeline / Modules)
 
 - `PhotoLoader` 继续负责分页，但当零延迟模式启用时只在真正需要时启动。
 - `ImagePipeline` 将 `targetSize` × `UIScreen.scale` 后统一请求，并通过 `ImageDiskCache` (LRU) + `NSCache` 管理缓存。
-- `prefetchMonthAssetsIfNeeded` 优先基于 `MetadataSnapshot.monthMomentIdentifiers` 调用 `PhotoRepository.fetchAssets(forMomentIdentifiers:)`，确保与系统“时光”一致；若该月份尚未生成 moment，则回退到 `prefetchMonth`。之后交给 `ImagePipeline.prefetch` 并注册到 `TaskPool`，可按月份取消。
+- `prefetchMonthAssetsIfNeeded` 优先基于 `MetadataSnapshot.monthMomentIdentifiers` 调用 `PhotoRepository.fetchAssets(forMomentIdentifiers:)`，确保与系统“时光”一致；若该月份尚未生成 moment，则回退到 `prefetchMonth`。之后交给 `ImagePipeline.prefetch` 并注册到 `TaskPool`，可按月份取消。零延迟 Detail ViewModel 也会复用同一套逻辑，将解析出的 asset id 注入 `PhotoCleanupViewModel.prepareSession`，旧版 Cleaner 即可直接消费。
 
 ## 6. 分批加载 / 可取消代码示例
 
@@ -84,6 +84,7 @@ await taskPool.insert(prefetchTask, scope: .prefetch)     // 离开页面时 Tas
   - `ensureAssetsPrepared`/`updateAuthorizationStatus`/`requestAuthorization` 同步 metadata 引导，必要时再启动真实分页。
   - `prefetchMonthAssetsIfNeeded` 改用 `PhotoRepository + ImagePipeline + TaskPool`，支持取消。
   - `scheduleBackgroundAnalysisIfNeeded` 接入 `BackgroundJobScheduler`，避免主线程阻塞。
+  - `prepareSession(with:month:)` 支持零延迟时光机将按月解析出的 `PHAsset` 列注入旧 Cleaner，会构建 `PhotoItem`、恢复标记状态并直接打开原有 UI。
 - `FeatureToggles.swift`：新增 `enableZeroLatencyPipeline`、`lazyLoadPhotoSessions` 控制入口。
 - 新文件：
   - `PhotoTidy/Models/DeviceStorageUsage.swift`

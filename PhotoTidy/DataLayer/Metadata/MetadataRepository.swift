@@ -76,19 +76,9 @@ final class MetadataRepository: NSObject, ObservableObject, PHPhotoLibraryChange
     private func generateSnapshot() {
         guard let fetchResult else { return }
         let entries = analysisCache.snapshot()
-        let calendar = Calendar.current
-        var monthBuckets: [String: MonthAccumulator] = [:]
         var counters = MetadataSnapshot.CategoryCounters.empty
 
         fetchResult.enumerateObjects { asset, _, _ in
-            guard let date = asset.creationDate ?? asset.modificationDate else { return }
-            let components = calendar.dateComponents([.year, .month], from: date)
-            guard let year = components.year, let month = components.month else { return }
-            let key = "\(year)-\(month)"
-            var bucket = monthBuckets[key] ?? MonthAccumulator(year: year, month: month, total: 0)
-            bucket.total += 1
-            monthBuckets[key] = bucket
-
             if asset.mediaType == .video {
                 counters.video += 1
             }
@@ -115,23 +105,15 @@ final class MetadataRepository: NSObject, ObservableObject, PHPhotoLibraryChange
             }
         }
 
-        let monthTotals = monthBuckets.values
-            .sorted { lhs, rhs in
-                if lhs.year == rhs.year {
-                    return lhs.month > rhs.month
-                }
-                return lhs.year > rhs.year
-            }
-            .map { MetadataSnapshot.MonthTotal(year: $0.year, month: $0.month, total: $0.total) }
-
-        let momentIndex = buildMonthMomentIndex()
+        let momentData = buildMonthMomentData()
+        let monthTotals = momentData.totals
 
         let snapshot = MetadataSnapshot(
             schemaVersion: MetadataSnapshot.schemaVersion,
             generatedAt: Date(),
             totalCount: fetchResult.count,
             monthTotals: monthTotals,
-            monthMomentIdentifiers: momentIndex,
+            monthMomentIdentifiers: momentData.identifiers,
             categoryCounters: counters,
             deviceStorageUsage: DeviceStorageUsage.current(),
             cachedAnalysisVersion: PhotoAnalysisCacheEntry.currentVersion,
@@ -149,26 +131,43 @@ final class MetadataRepository: NSObject, ObservableObject, PHPhotoLibraryChange
 }
 
 private extension MetadataRepository {
-    struct MonthAccumulator {
-        let year: Int
-        let month: Int
-        var total: Int
-    }
-
     static let largeFileThreshold = 15 * 1_024 * 1_024
 
-    func buildMonthMomentIndex() -> [String: [String]] {
-        var index: [String: [String]] = [:]
+    func buildMonthMomentData() -> (totals: [MetadataSnapshot.MonthTotal], identifiers: [String: [String]]) {
+        struct MomentAggregate {
+            var year: Int
+            var month: Int
+            var total: Int
+            var identifiers: [String]
+        }
+        var aggregates: [String: MomentAggregate] = [:]
         let calendar = Calendar.current
-        let collections = PHAssetCollection.fetchAssetCollections(with: .moment, subtype: .any, options: nil)
-        collections.enumerateObjects { collection, _, _ in
+        let moments = PHAssetCollection.fetchAssetCollections(with: .moment, subtype: .any, options: nil)
+        moments.enumerateObjects { collection, _, _ in
             guard let start = collection.startDate ?? collection.endDate else { return }
             let comps = calendar.dateComponents([.year, .month], from: start)
             guard let year = comps.year, let month = comps.month else { return }
             let key = "\(year)-\(month)"
-            index[key, default: []].append(collection.localIdentifier)
+            var aggregate = aggregates[key] ?? MomentAggregate(year: year, month: month, total: 0, identifiers: [])
+            let assets = PHAsset.fetchAssets(in: collection, options: nil)
+            aggregate.total += assets.count
+            aggregate.identifiers.append(collection.localIdentifier)
+            aggregates[key] = aggregate
         }
-        return index
+        let totals = aggregates.values
+            .sorted {
+                if $0.year == $1.year {
+                    return $0.month > $1.month
+                }
+                return $0.year > $1.year
+            }
+            .map { MetadataSnapshot.MonthTotal(year: $0.year, month: $0.month, total: $0.total) }
+
+        let identifiers = aggregates.reduce(into: [String: [String]]()) { partialResult, element in
+            let key = "\(element.value.year)-\(element.value.month)"
+            partialResult[key] = element.value.identifiers
+        }
+        return (totals, identifiers)
     }
 
     func estimatedSize(for asset: PHAsset) -> Int {

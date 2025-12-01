@@ -160,6 +160,23 @@ actor PhotoRepository {
         return ids
     }
 
+    func assetIdentifiersFromMoments(year: Int, month: Int) async -> [String] {
+        await bootstrapLibraryIfNeeded()
+        let calendar = Calendar.current
+        let moments = PHAssetCollection.fetchAssetCollections(with: .moment, subtype: .any, options: nil)
+        var identifiers: [String] = []
+        moments.enumerateObjects { collection, _, _ in
+            guard let start = collection.startDate ?? collection.endDate else { return }
+            let comps = calendar.dateComponents([.year, .month], from: start)
+            guard comps.year == year, comps.month == month else { return }
+            let assets = PHAsset.fetchAssets(in: collection, options: nil)
+            assets.enumerateObjects { asset, _, _ in
+                identifiers.append(asset.localIdentifier)
+            }
+        }
+        return identifiers
+    }
+
     private func fetchResult(for query: PhotoQuery) -> PHFetchResult<PHAsset>? {
         if let cached = scopedFetchResults[query] {
             return cached

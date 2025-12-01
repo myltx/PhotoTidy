@@ -62,14 +62,24 @@ final class TimeMachineZeroLatencyViewModel: ObservableObject {
         isLoading = false
     }
 
-    func detailViewModel(for month: MonthInfo) -> TimeMachineMonthDetailViewModel {
+    private func makeDetailViewModel(for month: MonthInfo, autoLoad: Bool) -> TimeMachineMonthDetailViewModel {
         TimeMachineMonthDetailViewModel(
             month: month,
             snapshot: latestSnapshot,
             assetIndexStore: assetIndexStore,
             photoRepository: photoRepository,
             imageManager: imageManager,
-            analysisManager: analysisManager
+            analysisManager: analysisManager,
+            autoLoad: autoLoad
         )
+    }
+
+    func detailViewModel(for month: MonthInfo) -> TimeMachineMonthDetailViewModel {
+        makeDetailViewModel(for: month, autoLoad: true)
+    }
+
+    func prepareSession(for month: MonthInfo) async -> Bool {
+        let detailVM = makeDetailViewModel(for: month, autoLoad: false)
+        return await detailVM.injectSessionIntoCleanup()
     }
 }

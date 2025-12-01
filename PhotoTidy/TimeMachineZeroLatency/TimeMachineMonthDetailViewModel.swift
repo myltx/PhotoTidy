@@ -26,7 +26,8 @@ final class TimeMachineMonthDetailViewModel: ObservableObject {
         assetIndexStore: AssetIndexStore,
         photoRepository: PhotoRepository,
         imageManager: TimeMachineImageManagerWrapper,
-        analysisManager: TimeMachineAnalysisManager
+        analysisManager: TimeMachineAnalysisManager,
+        autoLoad: Bool = true
     ) {
         self.month = month
         self.snapshot = snapshot
@@ -34,12 +35,14 @@ final class TimeMachineMonthDetailViewModel: ObservableObject {
         self.photoRepository = photoRepository
         self.imageManager = imageManager
         self.analysisManager = analysisManager
-        Task { await loadInitialIds() }
+        if autoLoad {
+            Task { await loadInitialIds() }
+        }
     }
 
     func loadInitialIds() async {
         isLoading = true
-        cachedAssetIds = await ensureAssetIds()
+        cachedAssetIds = await ensureAssetIdentifiers()
         await MainActor.run {
             self.assetIds = cachedAssetIds
             self.isLoading = false
@@ -86,7 +89,7 @@ final class TimeMachineMonthDetailViewModel: ObservableObject {
         }
     }
 
-    private func ensureAssetIds() async -> [String] {
+    func ensureAssetIdentifiers() async -> [String] {
         if let cached = await assetIndexStore.cachedIds(for: monthKey) {
             return cached
         }
@@ -98,9 +101,12 @@ final class TimeMachineMonthDetailViewModel: ObservableObject {
     private func resolveAssetIdentifiers() async -> [String] {
         if let moments = snapshot.monthMomentIdentifiers[monthKey], !moments.isEmpty {
             return await photoRepository.assetIdentifiers(forMomentIdentifiers: moments)
-        } else {
-            return await photoRepository.assetIdentifiers(forMonth: month.year, month: month.month)
         }
+        let momentDerived = await photoRepository.assetIdentifiersFromMoments(year: month.year, month: month.month)
+        if !momentDerived.isEmpty {
+            return momentDerived
+        }
+        return await photoRepository.assetIdentifiers(forMonth: month.year, month: month.month)
     }
 
     private var monthKey: String {
@@ -116,5 +122,17 @@ final class TimeMachineMonthDetailViewModel: ObservableObject {
             result.append(asset)
         }
         return result
+    }
+
+    func injectSessionIntoCleanup() async -> Bool {
+        guard let cleanup = PhotoCleanupViewModel.shared else { return false }
+        let identifiers = await ensureAssetIdentifiers()
+        guard !identifiers.isEmpty else { return false }
+        let assets = await photoRepository.assets(for: identifiers)
+        guard !assets.isEmpty else { return false }
+        let assetMap = Dictionary(uniqueKeysWithValues: assets.map { ($0.localIdentifier, $0) })
+        let orderedAssets = identifiers.compactMap { assetMap[$0] }
+        guard !orderedAssets.isEmpty else { return false }
+        return await cleanup.prepareSession(with: orderedAssets, month: month)
     }
 }

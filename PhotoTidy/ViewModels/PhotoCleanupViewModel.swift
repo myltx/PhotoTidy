@@ -4,6 +4,7 @@ import Photos
 import Vision
 
 final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
+    static weak var shared: PhotoCleanupViewModel?
     // MARK: - Properties
     
     // Status
@@ -148,6 +149,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         self.smartCleanupProgress = smartCleanupProgressStore.load()
         self.skippedPhotoRecords = skippedPhotoStore.allRecords()
         super.init()
+        PhotoCleanupViewModel.shared = self
         refreshTimeMachineSnapshots()
         setupMetadataPipeline()
         PHPhotoLibrary.shared().register(self)
@@ -167,6 +169,9 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     }
     
     deinit {
+        if PhotoCleanupViewModel.shared === self {
+            PhotoCleanupViewModel.shared = nil
+        }
         PHPhotoLibrary.shared().unregisterChangeObserver(self)
         Task { await taskPool.cancelAll() }
         Task { await backgroundScheduler.cancelAll() }
@@ -254,6 +259,27 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         activeMonthContext = (year, month)
         rebuildMonthSession(year: year, month: month)
         isShowingCleaner = true
+    }
+
+    @MainActor
+    func prepareSession(with assets: [PHAsset], month: MonthInfo) -> Bool {
+        guard !assets.isEmpty else { return false }
+        isLoading = true
+        let preparedItems = buildPhotoItems(from: assets)
+        guard !preparedItems.isEmpty else {
+            isLoading = false
+            return false
+        }
+        integratePreparedItems(preparedItems)
+        hasInitializedSession = true
+        activeMonthContext = (month.year, month.month)
+        sessionItems = preparedItems
+        sessionItemIds = Set(preparedItems.map(\.id))
+        currentFilter = .all
+        currentIndex = 0
+        isShowingCleaner = true
+        isLoading = false
+        return true
     }
     
     func hideCleaner() {
@@ -1366,6 +1392,42 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
             DispatchQueue.main.async {
                 self.ingestAssets(limitedAssets)
                 self.monthPrefetchingKeys.remove(key)
+            }
+        }
+    }
+
+    private func buildPhotoItems(from assets: [PHAsset]) -> [PhotoItem] {
+        guard !assets.isEmpty else { return [] }
+        let cacheEntries = analysisCache.snapshot()
+        var incoming: [PhotoItem] = []
+        for asset in assets {
+            let estimatedSize = assetResourceSize(for: asset)
+            var item = photoItem(for: asset, estimatedSize: estimatedSize)
+            let id = item.id
+            if let entry = cacheEntries[id],
+               entry.version == PhotoAnalysisCacheEntry.currentVersion,
+               entry.fileSize == item.fileSize {
+                applyCachedEntry(entry, to: &item)
+            }
+            incoming.append(item)
+        }
+        restoreSelectionStates(in: &incoming)
+        return incoming.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
+    }
+
+    private func integratePreparedItems(_ newItems: [PhotoItem]) {
+        guard !newItems.isEmpty else { return }
+        var indexMap: [String: Int] = [:]
+        for (index, item) in items.enumerated() {
+            indexMap[item.id] = index
+        }
+        for item in newItems {
+            loadedAssetIdentifiers.insert(item.id)
+            if let idx = indexMap[item.id] {
+                items[idx] = item
+            } else {
+                indexMap[item.id] = items.count
+                items.append(item)
             }
         }
     }

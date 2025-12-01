@@ -10,5 +10,5 @@ enum FeatureToggles {
     /// 是否延迟真实照片分页加载，在用户进入模块时才启动
     static let lazyLoadPhotoSessions = true
     /// 是否启用零延迟时光机模块
-    static let useZeroLatencyTimeMachine = false
+    static let useZeroLatencyTimeMachine = true
 }
