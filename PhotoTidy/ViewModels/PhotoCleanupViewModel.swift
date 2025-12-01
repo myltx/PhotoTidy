@@ -262,23 +262,30 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     }
 
     @MainActor
-    func prepareSession(with assets: [PHAsset], month: MonthInfo) -> Bool {
+    func prepareSession(with assets: [PHAsset], month: MonthInfo) async -> Bool {
         guard !assets.isEmpty else { return false }
-        isLoading = true
-        let preparedItems = buildPhotoItems(from: assets)
+        await MainActor.run { self.isLoading = true }
+        let preparedItems = await Task.detached(priority: .userInitiated) { [weak self] () -> [PhotoItem] in
+            guard let self else { return [] }
+            return self.buildPhotoItems(from: assets)
+        }.value
         guard !preparedItems.isEmpty else {
-            isLoading = false
+            await MainActor.run { self.isLoading = false }
             return false
         }
-        integratePreparedItems(preparedItems)
-        hasInitializedSession = true
-        activeMonthContext = (month.year, month.month)
-        sessionItems = preparedItems
-        sessionItemIds = Set(preparedItems.map(\.id))
-        currentFilter = .all
-        currentIndex = 0
-        isShowingCleaner = true
-        isLoading = false
+        await MainActor.run {
+            var restored = preparedItems
+            self.restoreSelectionStates(in: &restored)
+            self.integratePreparedItems(restored)
+            self.hasInitializedSession = true
+            self.activeMonthContext = (month.year, month.month)
+            self.sessionItems = restored
+            self.sessionItemIds = Set(restored.map(\.id))
+            self.currentFilter = .all
+            self.currentIndex = 0
+            self.isShowingCleaner = true
+            self.isLoading = false
+        }
         return true
     }
     
@@ -1396,7 +1403,7 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
         }
     }
 
-    private func buildPhotoItems(from assets: [PHAsset]) -> [PhotoItem] {
+    nonisolated func buildPhotoItems(from assets: [PHAsset]) -> [PhotoItem] {
         guard !assets.isEmpty else { return [] }
         let cacheEntries = analysisCache.snapshot()
         var incoming: [PhotoItem] = []
@@ -1411,7 +1418,6 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
             }
             incoming.append(item)
         }
-        restoreSelectionStates(in: &incoming)
         return incoming.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
     }
 

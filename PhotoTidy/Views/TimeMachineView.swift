@@ -137,10 +137,14 @@ private extension TimeMachineView {
 
     func handleMonthSelection(_ info: MonthInfo) {
         if FeatureToggles.useZeroLatencyTimeMachine {
-            Task { @MainActor in
+            Task(priority: .userInitiated) {
                 let success = await zeroLatencyTimelineViewModel.prepareSession(for: info)
-                if !success {
-                    viewModel.showCleaner(forMonth: info.year, month: info.month)
+                await MainActor.run {
+                    if success {
+                        viewModel.showCleaner(forMonth: info.year, month: info.month)
+                    } else {
+                        viewModel.showCleaner(forMonth: info.year, month: info.month)
+                    }
                 }
             }
         } else {
@@ -228,6 +232,7 @@ private struct MonthSquare: View {
     private struct Palette {
         let background: Color
         let text: Color
+        
         let unitText: Color
         let baseBorder: Color
         let progressBorder: Color?

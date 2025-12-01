@@ -2,7 +2,6 @@ import Foundation
 import Combine
 import Photos
 
-@MainActor
 final class TimeMachineZeroLatencyViewModel: ObservableObject {
     @Published private(set) var sections: [TimeMachineMonthSection]
     @Published var authorizationStatus: PHAuthorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
@@ -29,7 +28,7 @@ final class TimeMachineZeroLatencyViewModel: ObservableObject {
             .sink { [weak self] snapshot in
                 guard let self else { return }
                 self.latestSnapshot = snapshot
-                Task { await self.handle(snapshot: snapshot) }
+                self.handle(snapshot: snapshot)
             }
             .store(in: &cancellables)
     }
@@ -51,17 +50,24 @@ final class TimeMachineZeroLatencyViewModel: ObservableObject {
         }
     }
 
-    private func handle(snapshot: MetadataSnapshot) async {
-        guard authorizationStatus.isAuthorized else { return }
-        isLoading = true
-        await metaStore.rebuild(
-            snapshot: snapshot,
-            progressStore: progressStore,
-            skippedStore: skippedStore
-        )
-        let actualSections = await metaStore.sections()
-        self.sections = mergeSections(with: actualSections)
-        isLoading = false
+    private func handle(snapshot: MetadataSnapshot) {
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            let authorized = await MainActor.run { self.authorizationStatus.isAuthorized }
+            guard authorized else { return }
+            await MainActor.run { self.isLoading = true }
+            await self.metaStore.rebuild(
+                snapshot: snapshot,
+                progressStore: self.progressStore,
+                skippedStore: self.skippedStore
+            )
+            let actualSections = await self.metaStore.sections()
+            let merged = self.mergeSections(with: actualSections)
+            await MainActor.run {
+                self.sections = merged
+                self.isLoading = false
+            }
+        }
     }
 
     private func makeDetailViewModel(for month: MonthInfo, autoLoad: Bool) -> TimeMachineMonthDetailViewModel {
@@ -81,8 +87,12 @@ final class TimeMachineZeroLatencyViewModel: ObservableObject {
     }
 
     func prepareSession(for month: MonthInfo) async -> Bool {
-        let detailVM = makeDetailViewModel(for: month, autoLoad: false)
-        return await detailVM.injectSessionIntoCleanup()
+        guard let cleanup = PhotoCleanupViewModel.shared else { return false }
+        let identifiers = await ensureAssetIdentifiers(for: month)
+        guard !identifiers.isEmpty else { return false }
+        let assets = await photoRepository.assets(for: identifiers)
+        guard !assets.isEmpty else { return false }
+        return await cleanup.prepareSession(with: assets, month: month)
     }
 
     private func mergeSections(with actual: [TimeMachineMonthSection]) -> [TimeMachineMonthSection] {
@@ -128,5 +138,32 @@ final class TimeMachineZeroLatencyViewModel: ObservableObject {
             return TimeMachineMonthSection(year: year, months: sortedMonths)
         }
         return sections.sorted { $0.year > $1.year }
+    }
+
+    private func ensureAssetIdentifiers(for month: MonthInfo) async -> [String] {
+        let key = monthKey(for: month)
+        if let cached = await assetIndexStore.cachedIds(for: key) {
+            return cached
+        }
+        let ids = await resolveAssetIdentifiers(for: month)
+        await assetIndexStore.cache(ids: ids, for: key)
+        return ids
+    }
+
+    private func resolveAssetIdentifiers(for month: MonthInfo) async -> [String] {
+        let snapshot = latestSnapshot
+        let key = monthKey(for: month)
+        if let moments = snapshot.monthMomentIdentifiers[key], !moments.isEmpty {
+            return await photoRepository.assetIdentifiers(forMomentIdentifiers: moments)
+        }
+        let momentDerived = await photoRepository.assetIdentifiersFromMoments(year: month.year, month: month.month)
+        if !momentDerived.isEmpty {
+            return momentDerived
+        }
+        return await photoRepository.assetIdentifiers(forMonth: month.year, month: month.month)
+    }
+
+    private func monthKey(for month: MonthInfo) -> String {
+        "\(month.year)-\(month.month)"
     }
 }
