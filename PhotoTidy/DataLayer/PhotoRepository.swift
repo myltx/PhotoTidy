@@ -135,6 +135,31 @@ actor PhotoRepository {
         return assets
     }
 
+    func assetIdentifiers(forMonth year: Int, month: Int) async -> [String] {
+        await bootstrapLibraryIfNeeded()
+        let query = PhotoQuery(scope: .month(year: year, month: month))
+        guard let fetchResult = fetchResult(for: query) ?? makeFetchResult(for: query) else { return [] }
+        var identifiers: [String] = []
+        fetchResult.enumerateObjects { asset, _, _ in
+            identifiers.append(asset.localIdentifier)
+        }
+        return identifiers
+    }
+
+    func assetIdentifiers(forMomentIdentifiers identifiers: [String]) async -> [String] {
+        await bootstrapLibraryIfNeeded()
+        guard !identifiers.isEmpty else { return [] }
+        let collections = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: identifiers, options: nil)
+        var ids: [String] = []
+        collections.enumerateObjects { collection, _, _ in
+            let assets = PHAsset.fetchAssets(in: collection, options: nil)
+            assets.enumerateObjects { asset, _, _ in
+                ids.append(asset.localIdentifier)
+            }
+        }
+        return ids
+    }
+
     private func fetchResult(for query: PhotoQuery) -> PHFetchResult<PHAsset>? {
         if let cached = scopedFetchResults[query] {
             return cached

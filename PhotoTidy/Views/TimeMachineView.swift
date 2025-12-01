@@ -13,27 +13,31 @@ struct TimeMachineView: View {
     private let squareColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 6)
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color(UIColor.systemGray5)
-                    .opacity(0.35)
-                    .ignoresSafeArea()
-                VStack(spacing: 0) {
-                    header
-                    Divider()
-                        .overlay(Color.gray.opacity(0.15))
-                    content
+        if FeatureToggles.useZeroLatencyTimeMachine {
+            TimeMachineZeroLatencyContainerView()
+        } else {
+            NavigationStack {
+                ZStack {
+                    Color(UIColor.systemGray5)
+                        .opacity(0.35)
+                        .ignoresSafeArea()
+                    VStack(spacing: 0) {
+                        header
+                        Divider()
+                            .overlay(Color.gray.opacity(0.15))
+                        content
+                    }
                 }
+                .navigationBarHidden(true)
             }
-            .navigationBarHidden(true)
-        }
-        .alert("重置时光机进度？", isPresented: $showingResetAlert) {
-            Button("取消", role: .cancel) {}
-            Button("重置", role: .destructive) {
-                viewModel.resetTimeMachineProgress()
+            .alert("重置时光机进度？", isPresented: $showingResetAlert) {
+                Button("取消", role: .cancel) {}
+                Button("重置", role: .destructive) {
+                    viewModel.resetTimeMachineProgress()
+                }
+            } message: {
+                Text("将清除待删与已确认记录，重新开始按月份整理。")
             }
-        } message: {
-            Text("将清除待删与已确认记录，重新开始按月份整理。")
         }
     }
 
