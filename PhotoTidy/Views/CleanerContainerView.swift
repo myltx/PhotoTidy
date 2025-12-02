@@ -23,7 +23,9 @@ struct CleanerContainerView: View {
                 .padding(.top, 8)
             } else if viewModel.isLoading {
                 Spacer()
-                LoadingPhotosView()
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .scaleEffect(1.1)
                 Spacer()
             } else {
                 Spacer()

@@ -275,13 +275,11 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
 
     func prepareSession(with assets: [PHAsset], month: MonthInfo) async -> Bool {
         guard !assets.isEmpty else { return false }
-        await MainActor.run { self.isLoading = true }
         let cacheSnapshot = analysisCache.snapshot()
-        let preparedItems = await Task.detached(priority: .userInitiated) { () -> [PhotoItem] in
-            return PhotoCleanupViewModel.buildZeroLatencyItems(from: assets, cache: cacheSnapshot)
+        let preparedItems = await Task.detached(priority: .userInitiated) { [assets] () -> [PhotoItem] in
+            PhotoCleanupViewModel.buildZeroLatencyItems(from: assets, cache: cacheSnapshot)
         }.value
         guard !preparedItems.isEmpty else {
-            await MainActor.run { self.isLoading = false }
             return false
         }
         await MainActor.run {
@@ -292,9 +290,11 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             self.sessionItemIds = Set(preparedItems.map(\.id))
             self.currentFilter = .all
             self.currentIndex = 0
+        }
+        await configureLargeImagePipeline()
+        await MainActor.run {
             self.isShowingCleaner = true
             self.isLoading = false
-            self.configureLargeImagePipeline()
         }
         return true
     }
@@ -1473,21 +1473,17 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
         }
     }
 
-    private func configureLargeImagePipeline() {
+    private func configureLargeImagePipeline() async {
         guard isZeroLatencyTimeMachineSession else {
-            largeImageCache.removeAll()
+            await largeImagePager.configure(assets: [], targetSize: .zero)
+            await MainActor.run { self.largeImageCache.removeAll() }
             return
         }
         let assets = sessionItems.map(\.asset)
         let target = largeImageTargetSize
-        Task.detached(priority: .utility) { [weak self] in
-            guard let self else { return }
-            await self.largeImagePager.configure(assets: assets, targetSize: target)
-            let cache = await self.largeImagePager.ensureWindow(centerIndex: self.currentIndex)
-            await MainActor.run {
-                self.largeImageCache = cache
-            }
-        }
+        await largeImagePager.configure(assets: assets, targetSize: target)
+        let cache = await largeImagePager.ensureWindow(centerIndex: currentIndex)
+        await MainActor.run { self.largeImageCache = cache }
     }
 
     private func updateLargeImageWindowIfNeeded(center: Int) {
