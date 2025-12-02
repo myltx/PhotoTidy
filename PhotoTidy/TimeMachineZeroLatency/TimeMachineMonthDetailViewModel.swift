@@ -57,14 +57,9 @@ final class TimeMachineMonthDetailViewModel: ObservableObject {
         }
     }
 
-    func cancelCaching() {
-        let batch = currentSliceAssets(count: currentOffset)
-        imageManager.stopCaching(assets: batch, targetSize: targetSize)
-    }
-
     private func loadNextBatchIfNeeded() async {
         guard currentOffset < cachedAssetIds.count else { return }
-        let batch = await assetIndexStore.batch(for: monthKey, offset: currentOffset, limit: batchSize)
+        let batch = await assetIndexStore.batch(for: monthKeyString, offset: currentOffset, limit: batchSize)
         guard !batch.ids.isEmpty else { return }
         currentOffset += batch.ids.count
         requestThumbnails(for: batch.ids)
@@ -90,16 +85,16 @@ final class TimeMachineMonthDetailViewModel: ObservableObject {
     }
 
     func ensureAssetIdentifiers() async -> [String] {
-        if let cached = await assetIndexStore.cachedIds(for: monthKey) {
+        if let cached = await assetIndexStore.cachedIds(for: monthKeyString) {
             return cached
         }
         let ids = await resolveAssetIdentifiers()
-        await assetIndexStore.cache(ids: ids, for: monthKey)
+        await assetIndexStore.cache(ids: ids, for: monthKeyString)
         return ids
     }
 
     private func resolveAssetIdentifiers() async -> [String] {
-        if let moments = snapshot.monthMomentIdentifiers[monthKey], !moments.isEmpty {
+        if let moments = snapshot.monthMomentIdentifiers[monthKeyString], !moments.isEmpty {
             return await photoRepository.assetIdentifiers(forMomentIdentifiers: moments)
         }
         let momentDerived = await photoRepository.assetIdentifiersFromMoments(year: month.year, month: month.month)
@@ -109,30 +104,7 @@ final class TimeMachineMonthDetailViewModel: ObservableObject {
         return await photoRepository.assetIdentifiers(forMonth: month.year, month: month.month)
     }
 
-    private var monthKey: String {
+    private var monthKeyString: String {
         "\(month.year)-\(month.month)"
-    }
-
-    private func currentSliceAssets(count: Int) -> [PHAsset] {
-        guard count > 0 else { return [] }
-        let ids = Array(assetIds.prefix(count))
-        let assets = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
-        var result: [PHAsset] = []
-        assets.enumerateObjects { asset, _, _ in
-            result.append(asset)
-        }
-        return result
-    }
-
-    func injectSessionIntoCleanup() async -> Bool {
-        guard let cleanup = PhotoCleanupViewModel.shared else { return false }
-        let identifiers = await ensureAssetIdentifiers()
-        guard !identifiers.isEmpty else { return false }
-        let assets = await photoRepository.assets(for: identifiers)
-        guard !assets.isEmpty else { return false }
-        let assetMap = Dictionary(uniqueKeysWithValues: assets.map { ($0.localIdentifier, $0) })
-        let orderedAssets = identifiers.compactMap { assetMap[$0] }
-        guard !orderedAssets.isEmpty else { return false }
-        return await cleanup.prepareSession(with: orderedAssets, month: month)
     }
 }

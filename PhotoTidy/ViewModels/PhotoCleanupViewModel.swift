@@ -2,6 +2,7 @@ import SwiftUI
 import Combine
 import Photos
 import Vision
+import UIKit
 
 final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
     static weak var shared: PhotoCleanupViewModel?
@@ -272,24 +273,29 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         isShowingCleaner = true
     }
 
-    func prepareSession(with assets: [PHAsset], month: MonthInfo) -> Bool {
+    func prepareSession(with assets: [PHAsset], month: MonthInfo) async -> Bool {
         guard !assets.isEmpty else { return false }
-        isLoading = true
-        let preparedItems = buildPhotoItems(from: assets)
+        await MainActor.run { self.isLoading = true }
+        let cacheSnapshot = analysisCache.snapshot()
+        let preparedItems = await Task.detached(priority: .userInitiated) { () -> [PhotoItem] in
+            return PhotoCleanupViewModel.buildZeroLatencyItems(from: assets, cache: cacheSnapshot)
+        }.value
         guard !preparedItems.isEmpty else {
-            isLoading = false
+            await MainActor.run { self.isLoading = false }
             return false
         }
-        integratePreparedItems(preparedItems)
-        hasInitializedSession = true
-        activeMonthContext = (month.year, month.month)
-        sessionItems = preparedItems
-        sessionItemIds = Set(preparedItems.map(\.id))
-        currentFilter = .all
-        currentIndex = 0
-        isShowingCleaner = true
-        isLoading = false
-        configureLargeImagePipeline()
+        await MainActor.run {
+            self.integratePreparedItems(preparedItems)
+            self.hasInitializedSession = true
+            self.activeMonthContext = (month.year, month.month)
+            self.sessionItems = preparedItems
+            self.sessionItemIds = Set(preparedItems.map(\.id))
+            self.currentFilter = .all
+            self.currentIndex = 0
+            self.isShowingCleaner = true
+            self.isLoading = false
+            self.configureLargeImagePipeline()
+        }
         return true
     }
     
@@ -514,7 +520,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             if let entry = cacheEntries[id],
                entry.version == PhotoAnalysisCacheEntry.currentVersion,
                entry.fileSize == item.fileSize {
-                applyCachedEntry(entry, to: &item)
+                Self.applyCachedEntry(entry, to: &item)
             }
             incoming.append(item)
         }
@@ -557,7 +563,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         filtered.forEach { sessionItemIds.insert($0.id) }
     }
 
-    private func applyCachedEntry(_ entry: PhotoAnalysisCacheEntry, to item: inout PhotoItem) {
+    nonisolated private static func applyCachedEntry(_ entry: PhotoAnalysisCacheEntry, to item: inout PhotoItem) {
         item.isScreenshot = entry.isScreenshot
         item.isDocumentLike = entry.isDocumentLike
         item.isTextImage = entry.isTextImage
@@ -857,12 +863,8 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         timeMachineProgressStore.progress(year: year, month: month)
     }
     
-    func photoItem(for asset: PHAsset, estimatedSize: Int) -> PhotoItem {
-        if let existing = items.first(where: { $0.id == asset.localIdentifier }) {
-            return existing
-        }
-        
-        return PhotoItem(
+    private static func makePhotoItem(for asset: PHAsset, estimatedSize: Int) -> PhotoItem {
+        PhotoItem(
             id: asset.localIdentifier,
             asset: asset,
             pixelSize: CGSize(width: asset.pixelWidth, height: asset.pixelHeight),
@@ -882,6 +884,13 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             assetType: nil,
             markedForDeletion: false
         )
+    }
+    
+    func photoItem(for asset: PHAsset, estimatedSize: Int) -> PhotoItem {
+        if let existing = items.first(where: { $0.id == asset.localIdentifier }) {
+            return existing
+        }
+        return Self.makePhotoItem(for: asset, estimatedSize: estimatedSize)
     }
 
     private func revalidateSimilarGroups() {
@@ -1251,6 +1260,10 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     }
     
     func assetResourceSize(for asset: PHAsset) -> Int {
+        Self.assetResourceSizeStatic(for: asset)
+    }
+
+    nonisolated private static func assetResourceSizeStatic(for asset: PHAsset) -> Int {
         let resources = PHAssetResource.assetResources(for: asset)
         if asset.mediaType == .video {
             if let video = resources.first(where: { $0.type == .video }),
@@ -1412,17 +1425,34 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
         let cacheEntries = analysisCache.snapshot()
         var incoming: [PhotoItem] = []
         for asset in assets {
-            let estimatedSize = assetResourceSize(for: asset)
+            let estimatedSize = PhotoCleanupViewModel.assetResourceSizeStatic(for: asset)
             var item = photoItem(for: asset, estimatedSize: estimatedSize)
             let id = item.id
             if let entry = cacheEntries[id],
                entry.version == PhotoAnalysisCacheEntry.currentVersion,
                entry.fileSize == item.fileSize {
-                applyCachedEntry(entry, to: &item)
+                Self.applyCachedEntry(entry, to: &item)
             }
             incoming.append(item)
         }
         restoreSelectionStates(in: &incoming)
+        return incoming.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
+    }
+
+    nonisolated private static func buildZeroLatencyItems(from assets: [PHAsset], cache: [String: PhotoAnalysisCacheEntry]) -> [PhotoItem] {
+        guard !assets.isEmpty else { return [] }
+        var incoming: [PhotoItem] = []
+        for asset in assets {
+            let estimatedSize = assetResourceSizeStatic(for: asset)
+            var item = Self.makePhotoItem(for: asset, estimatedSize: estimatedSize)
+            let id = item.id
+            if let entry = cache[id],
+               entry.version == PhotoAnalysisCacheEntry.currentVersion,
+               entry.fileSize == item.fileSize {
+                Self.applyCachedEntry(entry, to: &item)
+            }
+            incoming.append(item)
+        }
         return incoming.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
     }
 

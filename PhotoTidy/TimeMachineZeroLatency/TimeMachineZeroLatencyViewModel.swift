@@ -92,9 +92,7 @@ final class TimeMachineZeroLatencyViewModel: ObservableObject {
         guard !identifiers.isEmpty else { return false }
         let assets = await photoRepository.assets(for: identifiers)
         guard !assets.isEmpty else { return false }
-        return await MainActor.run {
-            cleanup.prepareSession(with: assets, month: month)
-        }
+        return await cleanup.prepareSession(with: assets, month: month)
     }
 
     private func mergeSections(with actual: [TimeMachineMonthSection]) -> [TimeMachineMonthSection] {

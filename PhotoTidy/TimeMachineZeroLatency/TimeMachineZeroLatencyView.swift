@@ -132,12 +132,9 @@ struct TimeMachineMonthDetailView: View {
                         viewModel.loadMoreIfNeeded(currentId: id)
                     }
                 }
-            }
-            .padding(6)
         }
-        .navigationTitle("\(viewModel.assetIds.count) 张照片")
-        .onDisappear {
-            viewModel.cancelCaching()
-        }
+        .padding(6)
     }
+    .navigationTitle("\(viewModel.assetIds.count) 张照片")
+}
 }
