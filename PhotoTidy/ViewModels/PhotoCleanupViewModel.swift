@@ -282,6 +282,13 @@ private var hasScheduledInitialAssetLoad = false
         isShowingCleaner = true
     }
 
+    func makeZeroLatencyTimeMachineViewModel() -> TimeMachineZeroLatencyViewModel {
+        TimeMachineZeroLatencyViewModel(
+            metadataRepository: metadataRepository,
+            analysisCache: analysisCache
+        )
+    }
+
     func prepareSession(with assets: [PHAsset], month: MonthInfo) async -> SessionPreparationResult {
         guard !assets.isEmpty else { return .failed }
         cancelSessionPreparation()

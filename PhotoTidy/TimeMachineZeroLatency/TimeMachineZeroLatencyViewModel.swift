@@ -14,16 +14,25 @@ final class TimeMachineZeroLatencyViewModel: ObservableObject {
     private let assetIndexStore = AssetIndexStore()
     private let imageManager = TimeMachineImageManagerWrapper()
     private let photoRepository = PhotoRepository()
-    private let analysisManager = TimeMachineAnalysisManager()
-    private let analysisCache = PhotoAnalysisCacheStore()
+    private let analysisManager: TimeMachineAnalysisManager
+    private let analysisCache: PhotoAnalysisCacheStore
     private var cancellables: Set<AnyCancellable> = []
     private var latestSnapshot: MetadataSnapshot = .empty
     private let placeholderYears = 4
     private var sessionPreparationTask: Task<SessionPreparationResult, Never>?
     private var sessionPreparationToken: UUID?
 
-    init() {
-        self.metadataRepository = MetadataRepository(analysisCache: analysisCache)
+    init(
+        metadataRepository: MetadataRepository? = nil,
+        analysisCache: PhotoAnalysisCacheStore = PhotoAnalysisCacheStore()
+    ) {
+        self.analysisCache = analysisCache
+        self.analysisManager = TimeMachineAnalysisManager(analysisCache: analysisCache)
+        if let metadataRepository {
+            self.metadataRepository = metadataRepository
+        } else {
+            self.metadataRepository = MetadataRepository(analysisCache: analysisCache)
+        }
         self.sections = TimeMachineZeroLatencyViewModel.makePlaceholderSections(yearsBack: placeholderYears)
         metadataRepository.$snapshot
             .receive(on: DispatchQueue.main)

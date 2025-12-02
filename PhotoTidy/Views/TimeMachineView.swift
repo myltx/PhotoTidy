@@ -3,10 +3,13 @@ import SwiftUI
 struct TimeMachineView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
     @State private var showingResetAlert = false
-    @StateObject private var zeroLatencyTimelineViewModel = TimeMachineZeroLatencyViewModel()
+    @StateObject private var zeroLatencyTimelineViewModel: TimeMachineZeroLatencyViewModel
 
     init(viewModel: PhotoCleanupViewModel) {
         self.viewModel = viewModel
+        _zeroLatencyTimelineViewModel = StateObject(
+            wrappedValue: viewModel.makeZeroLatencyTimeMachineViewModel()
+        )
     }
 
     private let squareColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 6)
