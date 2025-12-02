@@ -13,28 +13,27 @@ final class TimeMachineMonthDetailViewModel: ObservableObject {
     private let snapshot: MetadataSnapshot
     private let assetIndexStore: AssetIndexStore
     private let photoRepository: PhotoRepository
-    private let imageManager: TimeMachineImageManagerWrapper
     private let analysisManager: TimeMachineAnalysisManager
+    private let thumbnailStore: ThumbnailStore
     private let batchSize = 20
     private var currentOffset = 0
     private var cachedAssetIds: [String] = []
-    private let targetSize = CGSize(width: 200, height: 200)
 
     init(
         month: MonthInfo,
         snapshot: MetadataSnapshot,
         assetIndexStore: AssetIndexStore,
         photoRepository: PhotoRepository,
-        imageManager: TimeMachineImageManagerWrapper,
         analysisManager: TimeMachineAnalysisManager,
+        thumbnailStore: ThumbnailStore,
         autoLoad: Bool = true
     ) {
         self.month = month
         self.snapshot = snapshot
         self.assetIndexStore = assetIndexStore
         self.photoRepository = photoRepository
-        self.imageManager = imageManager
         self.analysisManager = analysisManager
+        self.thumbnailStore = thumbnailStore
         if autoLoad {
             Task { await loadInitialIds() }
         }
@@ -66,21 +65,17 @@ final class TimeMachineMonthDetailViewModel: ObservableObject {
     }
 
     private func requestThumbnails(for ids: [String]) {
-        let assets = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
-        var fetchedAssets: [PHAsset] = []
-        assets.enumerateObjects { [weak self] asset, _, _ in
+        Task { [weak self] in
             guard let self else { return }
-            fetchedAssets.append(asset)
-            self.imageManager.requestThumbnail(for: asset, targetSize: self.targetSize) { [weak self] image in
-                guard let self else { return }
-                Task { @MainActor in
-                    self.thumbnails[asset.localIdentifier] = image
+            await thumbnailStore.preload(assetIds: ids, target: .monthDetail)
+            for id in ids {
+                if let image = await thumbnailStore.thumbnail(for: id, target: .monthDetail) {
+                    await MainActor.run {
+                        self.thumbnails[id] = image
+                    }
                 }
             }
-        }
-        imageManager.startCaching(assets: fetchedAssets, targetSize: targetSize)
-        Task {
-            await analysisManager.enqueue(ids: fetchedAssets.map(\.localIdentifier))
+            await analysisManager.enqueue(ids: ids)
         }
     }
 

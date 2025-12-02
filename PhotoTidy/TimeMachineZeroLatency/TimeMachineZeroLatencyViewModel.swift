@@ -13,7 +13,6 @@ final class TimeMachineZeroLatencyViewModel: ObservableObject {
     private let progressStore = TimeMachineProgressStore()
     private let skippedStore = SkippedPhotoStore()
     private let assetIndexStore = AssetIndexStore()
-    private let imageManager = TimeMachineImageManagerWrapper()
     private let photoRepository = PhotoRepository()
     private let analysisManager: TimeMachineAnalysisManager
     private let analysisCache: PhotoAnalysisCacheStore
@@ -93,8 +92,8 @@ final class TimeMachineZeroLatencyViewModel: ObservableObject {
             snapshot: latestSnapshot,
             assetIndexStore: assetIndexStore,
             photoRepository: photoRepository,
-            imageManager: imageManager,
             analysisManager: analysisManager,
+            thumbnailStore: thumbnailStore,
             autoLoad: autoLoad
         )
     }

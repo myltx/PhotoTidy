@@ -2,6 +2,48 @@ import Foundation
 import UIKit
 import Photos
 
+protocol PhotoAssetFetching: AnyObject {
+    func assets(for identifiers: [String]) async -> [PHAsset]
+}
+
+protocol ImagePipelineType: AnyObject {
+    func requestImage(
+        for descriptor: AssetDescriptor,
+        targetSize: CGSize,
+        contentMode: PHImageContentMode,
+        completion: @escaping (UIImage?) -> Void
+    )
+    func prefetch(_ assets: [PHAsset], targetSize: CGSize)
+}
+
+extension PhotoRepository: PhotoAssetFetching {}
+
+final class ImagePipelineAdapter: ImagePipelineType {
+    private let pipeline: ImagePipeline
+
+    init(pipeline: ImagePipeline = ImagePipeline(memoryLimitBytes: 90 * 1_024 * 1_024)) {
+        self.pipeline = pipeline
+    }
+
+    func requestImage(
+        for descriptor: AssetDescriptor,
+        targetSize: CGSize,
+        contentMode: PHImageContentMode,
+        completion: @escaping (UIImage?) -> Void
+    ) {
+        pipeline.requestImage(
+            for: descriptor,
+            targetSize: targetSize,
+            contentMode: contentMode,
+            completion: completion
+        )
+    }
+
+    func prefetch(_ assets: [PHAsset], targetSize: CGSize) {
+        pipeline.prefetch(assets, targetSize: targetSize)
+    }
+}
+
 /// 描述缩略图请求的规格（尺寸 + contentMode）
 struct ThumbnailTarget: Hashable {
     let size: CGSize
@@ -32,6 +74,11 @@ struct ThumbnailTarget: Hashable {
         contentMode: .aspectFit
     )
 
+    static let monthDetail = ThumbnailTarget(
+        size: CGSize(width: 200, height: 200),
+        contentMode: .aspectFill
+    )
+
     func hash(into hasher: inout Hasher) {
         hasher.combine(size.width)
         hasher.combine(size.height)
@@ -50,15 +97,15 @@ struct ThumbnailTarget: Hashable {
 
 /// 统一的缩略图仓库，负责 AssetDescriptor 缓存、ImagePipeline 请求与批量预热
 actor ThumbnailStore {
-    private let photoRepository: PhotoRepository
-    private let imagePipeline: ImagePipeline
+    private let photoRepository: PhotoAssetFetching
+    private let imagePipeline: ImagePipelineType
 
     private var descriptorCache: [String: AssetDescriptor] = [:]
     private var inflightTasks: [CacheKey: Task<UIImage?, Never>] = [:]
 
     init(
-        photoRepository: PhotoRepository = PhotoRepository(),
-        imagePipeline: ImagePipeline = ImagePipeline(memoryLimitBytes: 90 * 1_024 * 1_024)
+        photoRepository: PhotoAssetFetching = PhotoRepository(),
+        imagePipeline: ImagePipelineType = ImagePipelineAdapter()
     ) {
         self.photoRepository = photoRepository
         self.imagePipeline = imagePipeline
@@ -86,7 +133,7 @@ actor ThumbnailStore {
         let descriptors = await descriptors(for: assetIds)
         guard !descriptors.isEmpty else { return }
         let assets = descriptors.map { $0.asset }
-        imagePipeline.prefetch(assets, targetSize: target.size)
+        imagePipeline.prefetch(assets, targetSize: target.pixelSize)
     }
 
     /// 清空 Descriptor 缓存，供相册刷新时调用
@@ -138,7 +185,7 @@ private extension ThumbnailStore {
             var resumed = false
             imagePipeline.requestImage(
                 for: descriptor,
-                targetSize: target.size,
+                targetSize: target.pixelSize,
                 contentMode: target.contentMode
             ) { image in
                 guard !resumed else { return }

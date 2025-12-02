@@ -8,6 +8,7 @@ import ImageIO
 struct AssetRichPreviewView: View {
     let asset: PHAsset
     var contentMode: PHImageContentMode = .aspectFit
+    var onRequestFullImage: ((String) -> Void)? = nil
 
     @State private var player: AVPlayer?
     @State private var playerObserver: NSObjectProtocol?
@@ -17,6 +18,7 @@ struct AssetRichPreviewView: View {
     @State private var animatedDuration: Double = 0
     @State private var isAnimatedPlaying = false
     @State private var isPreparingVideo = false
+    @State private var isRequestingFullImage = false
 
     private var badgeStyle: PlaybackBadge.Style? {
         switch asset.playbackStyle {
@@ -50,6 +52,7 @@ struct AssetRichPreviewView: View {
             isAnimatedPlaying = false
         }
         .task(id: asset.localIdentifier) {
+            onRequestFullImage?(asset.localIdentifier)
             if asset.playbackStyle == .imageAnimated {
                 await autoPlayAnimatedImage()
             }
@@ -94,6 +97,9 @@ struct AssetRichPreviewView: View {
                     AssetThumbnailView(asset: asset, target: .detailFit)
                         .frame(height: 260)
                 }
+                if isPreparingVideo || player == nil {
+                    loadingOverlay
+                }
             }
         case .livePhoto:
             ZStack {
@@ -101,6 +107,9 @@ struct AssetRichPreviewView: View {
                     .opacity(isLivePhotoPlaying ? 0 : 1)
                 if isLivePhotoPlaying {
                     LivePhotoPlayerView(asset: asset, isPlaying: $isLivePhotoPlaying)
+                }
+                if isLivePhotoPlaying {
+                    loadingOverlay
                 }
             }
         case .imageAnimated:
@@ -121,6 +130,7 @@ struct AssetRichPreviewView: View {
         switch asset.playbackStyle {
         case .video, .videoLooping:
             Task {
+                isPreparingVideo = true
                 if player == nil {
                     player = await loadPlayer()
                 }
@@ -130,6 +140,7 @@ struct AssetRichPreviewView: View {
                     player?.seek(to: .zero)
                     player?.isMuted = true
                     player?.play()
+                    isPreparingVideo = false
                 }
             }
         case .livePhoto:
@@ -190,6 +201,16 @@ struct AssetRichPreviewView: View {
                 isPreparingVideo = false
             }
         }
+    }
+
+    private var loadingOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.3)
+            ProgressView()
+                .progressViewStyle(.circular)
+                .tint(.white)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func preparePlayerObserver() {
