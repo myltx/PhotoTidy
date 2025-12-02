@@ -101,3 +101,18 @@ await taskPool.insert(prefetchTask, scope: .prefetch)     // 离开页面时 Tas
 - **后台任务**：`BackgroundJobScheduler` 将 Vision/模糊分析搬到 utility task，默认批量 50 张，可随 `TaskPool` 暂停。
 - **内存占用**：`ImagePipeline` 默认 120MB `NSCache` + 200MB `ImageDiskCache`，离开页面或收到内存警告时可统一 `cancelAll`。
 - **时光机数据**：`monthAssetTotals` 直接由 metadata 缓存提供，仅在 PhotoKit 有变更时重新扫描，从而在大库中依旧“秒开”。
+
+## 10. 零延迟覆盖现状（2025-02）
+
+| 场景 | 行为 | 触发真实照片的时机 |
+| --- | --- | --- |
+| **首页 / Dashboard** | 仅订阅 `metadataSnapshot`，展示总数、分类、月份统计。 | 进入 Cleaner / 某分类 Detail 后，由 `showCleaner` 调用 `ensureRealAssetPipeline()` 才分页加载。 |
+| **全相册整理 (CleanerContainerView)** | `prepareSessionInternal` 先用 `buildZeroLatencyItems` 构建 UI，卡片立即出现；`LargeImagePager` 只缓存当前/下一张/第三张。 | 滑动或进入卡片时才异步解码真实大图；返回时通过 `resetLargeImagePipeline()` 释放窗口。 |
+| **相似 / 模糊 / 截图 / 大文件专题** | 首屏数量来自 `metadataSnapshot.categoryCounters`，UI 秒开。 | 打开专题列表后复用 `PhotoRepository.fetchNextBatch`，分页并可取消。 |
+| **时光机** | `TimeMachineView` 只持有 `viewModel.makeZeroLatencyTimeMachineViewModel()`，共享 `MetadataRepository` + `PhotoAnalysisCacheStore`；进入页面即显示 4 年 placeholder。 | 用户点击月份后，`TimeMachineZeroLatencyViewModel.prepareSession` 按需解析 asset id → `PhotoCleanupViewModel.prepareSession`。真实 `PHAsset` 仅在点击月份时批量（20 张）加载，向后滚动再按需补齐。 |
+| **后台处理 / 缓存** | `BackgroundJobScheduler` 和 `PhotoAnalysisCacheStore` 负责相似、模糊、文件大小等增量结果，零首帧只读缓存。 | PhotoKit 有变化或用户长时间未处理时，后台任务被重新排程；可被 TaskPool/ScenePhase 取消。 |
+
+**统一保证：**
+- 应用内只有一份 `MetadataRepository`（由 `PhotoCleanupViewModel` 构建并注入时光机），冷启动时所有 Tab/视图共用这份 snapshot。
+- 所有真实 `PHAsset` 查询都集中在 `PhotoRepository`，并受 `TaskPool` 管控，可在页面离场、Tab 切换或会话取消时立即停止。
+- `FeatureToggles.enableZeroLatencyPipeline / lazyLoadPhotoSessions / useZeroLatencyTimeMachine` 默认开启，确保任何 build 均以零延迟策略运行；若需禁用，只需调整这些常量。***
