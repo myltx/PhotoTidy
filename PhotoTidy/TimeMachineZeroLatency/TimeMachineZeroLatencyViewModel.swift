@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import Photos
+import UIKit
 
 final class TimeMachineZeroLatencyViewModel: ObservableObject {
     @Published private(set) var sections: [TimeMachineMonthSection]
@@ -16,11 +17,13 @@ final class TimeMachineZeroLatencyViewModel: ObservableObject {
     private let photoRepository = PhotoRepository()
     private let analysisManager: TimeMachineAnalysisManager
     private let analysisCache: PhotoAnalysisCacheStore
+    private let thumbnailStore = ThumbnailStore()
     private var cancellables: Set<AnyCancellable> = []
     private var latestSnapshot: MetadataSnapshot = .empty
     private let placeholderYears = 4
     private var sessionPreparationTask: Task<SessionPreparationResult, Never>?
     private var sessionPreparationToken: UUID?
+    @Published private(set) var coverThumbnails: [String: UIImage] = [:]
 
     init(
         metadataRepository: MetadataRepository? = nil,
@@ -78,6 +81,7 @@ final class TimeMachineZeroLatencyViewModel: ObservableObject {
                 self.sections = merged
                 self.isLoading = false
             }
+            await self.preloadCoverThumbnails(for: merged)
         }
     }
 
@@ -203,5 +207,30 @@ final class TimeMachineZeroLatencyViewModel: ObservableObject {
 
     private func monthKey(for month: MonthInfo) -> String {
         "\(month.year)-\(month.month)"
+    }
+}
+
+extension TimeMachineZeroLatencyViewModel {
+    func coverImage(for monthId: String) -> UIImage? {
+        coverThumbnails[monthId]
+    }
+}
+
+private extension TimeMachineZeroLatencyViewModel {
+    func preloadCoverThumbnails(for sections: [TimeMachineMonthSection]) async {
+        let months = sections.flatMap { $0.months }
+        for info in months {
+            guard let assetId = info.coverAssetId else { continue }
+            if await isCoverCached(for: info.id) { continue }
+            let image = await thumbnailStore.thumbnail(for: assetId, target: .timelineCover)
+            guard let image else { continue }
+            await MainActor.run { self.coverThumbnails[info.id] = image }
+        }
+    }
+
+    func isCoverCached(for monthId: String) async -> Bool {
+        await MainActor.run {
+            self.coverThumbnails[monthId] != nil
+        }
     }
 }

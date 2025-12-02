@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct TimeMachineView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
@@ -65,9 +66,16 @@ struct TimeMachineView: View {
                                     title: "\(section.year) 年",
                                     primary: section.year == displayedSections.first?.year
                                 )
-                                MonthGridView(section: section, columns: squareColumns) { info in
-                                    handleMonthSelection(info)
-                                }
+                                MonthGridView(
+                                    section: section,
+                                    columns: squareColumns,
+                                    thumbnailProvider: { month in
+                                        zeroLatencyTimelineViewModel.coverImage(for: month.id)
+                                    },
+                                    onSelect: { info in
+                                        handleMonthSelection(info)
+                                    }
+                                )
                             }
                         }
                     }
@@ -211,12 +219,13 @@ private struct MonthGridHeader: View {
 private struct MonthGridView: View {
     let section: TimeMachineMonthSection
     let columns: [GridItem]
+    var thumbnailProvider: (MonthInfo) -> UIImage? = { _ in nil }
     var onSelect: (MonthInfo) -> Void
 
     var body: some View {
         LazyVGrid(columns: columns, spacing: 12) {
             ForEach(section.months) { info in
-                MonthSquare(info: info) {
+                MonthSquare(info: info, thumbnail: thumbnailProvider(info)) {
                     onSelect(info)
                 }
             }
@@ -226,6 +235,7 @@ private struct MonthGridView: View {
 
 private struct MonthSquare: View {
     let info: MonthInfo
+    let thumbnail: UIImage?
     var onTap: () -> Void
 
     private struct Palette {
@@ -240,9 +250,27 @@ private struct MonthSquare: View {
     var body: some View {
         Button(action: onTap) {
             let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
-            
-            shape
-                .fill(palette.background)
+
+            ZStack {
+                if let image = thumbnail {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .overlay(
+                            LinearGradient(
+                                colors: [
+                                    Color.black.opacity(0.45),
+                                    Color.black.opacity(0.05)
+                                ],
+                                startPoint: .bottom,
+                                endPoint: .top
+                            )
+                        )
+                } else {
+                    palette.background
+                }
+            }
+            .clipShape(shape)
                 .overlay(
                     shape.stroke(palette.baseBorder, lineWidth: 2)
                 )
@@ -253,10 +281,10 @@ private struct MonthSquare: View {
                         HStack(alignment: .bottom, spacing: 2) {
                             Text("\(info.month)")
                                 .font(.system(size: 20, weight: .bold))
-                                .foregroundColor(palette.text)
+                                .foregroundColor(labelTextColor)
                             Text("月")
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(palette.unitText)
+                                .foregroundColor(unitLabelColor)
                                 .baselineOffset(-1)
                         }
                     }
@@ -269,6 +297,20 @@ private struct MonthSquare: View {
 
     private var monthLabel: String {
         "\(info.month)"
+    }
+
+    private var labelTextColor: Color {
+        if thumbnail != nil {
+            return Color.white
+        }
+        return palette.text
+    }
+
+    private var unitLabelColor: Color {
+        if thumbnail != nil {
+            return Color.white.opacity(0.85)
+        }
+        return palette.unitText
     }
 
     private var palette: Palette {

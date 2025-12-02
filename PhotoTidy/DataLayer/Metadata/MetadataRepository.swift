@@ -83,6 +83,8 @@ final class MetadataRepository: NSObject, ObservableObject, PHPhotoLibraryChange
             totalCount: fetchResult.count,
             monthTotals: previous.monthTotals,
             monthMomentIdentifiers: previous.monthMomentIdentifiers,
+            monthCoverAssetIds: previous.monthCoverAssetIds,
+            monthDateRanges: previous.monthDateRanges,
             categoryCounters: counters,
             deviceStorageUsage: previous.deviceStorageUsage,
             cachedAnalysisVersion: PhotoAnalysisCacheEntry.currentVersion,
@@ -102,6 +104,8 @@ final class MetadataRepository: NSObject, ObservableObject, PHPhotoLibraryChange
                 totalCount: fetchResult.count,
                 monthTotals: momentData.totals,
                 monthMomentIdentifiers: momentData.identifiers,
+                monthCoverAssetIds: momentData.covers,
+                monthDateRanges: momentData.dateRanges,
                 categoryCounters: counters,
                 deviceStorageUsage: DeviceStorageUsage.current(),
                 cachedAnalysisVersion: PhotoAnalysisCacheEntry.currentVersion,
@@ -185,12 +189,20 @@ private extension MetadataRepository {
         return counters
     }
 
-    func buildMonthMomentData() -> (totals: [MetadataSnapshot.MonthTotal], identifiers: [String: [String]]) {
+    func buildMonthMomentData() -> (
+        totals: [MetadataSnapshot.MonthTotal],
+        identifiers: [String: [String]],
+        covers: [String: String],
+        dateRanges: [String: MetadataSnapshot.MonthDateRange]
+    ) {
         struct MomentAggregate {
             var year: Int
             var month: Int
             var total: Int
             var identifiers: [String]
+            var coverAssetId: String?
+            var earliestDate: Date?
+            var latestDate: Date?
         }
         var aggregates: [String: MomentAggregate] = [:]
         let calendar = Calendar.current
@@ -204,6 +216,23 @@ private extension MetadataRepository {
             let assets = PHAsset.fetchAssets(in: collection, options: nil)
             aggregate.total += assets.count
             aggregate.identifiers.append(collection.localIdentifier)
+            if aggregate.coverAssetId == nil, let cover = assets.firstObject?.localIdentifier {
+                aggregate.coverAssetId = cover
+            }
+            if let momentStart = collection.startDate ?? collection.endDate {
+                if let existingStart = aggregate.earliestDate {
+                    aggregate.earliestDate = min(existingStart, momentStart)
+                } else {
+                    aggregate.earliestDate = momentStart
+                }
+            }
+            if let momentEnd = collection.endDate ?? collection.startDate {
+                if let existingEnd = aggregate.latestDate {
+                    aggregate.latestDate = max(existingEnd, momentEnd)
+                } else {
+                    aggregate.latestDate = momentEnd
+                }
+            }
             aggregates[key] = aggregate
         }
         let totals = aggregates.values
@@ -219,7 +248,19 @@ private extension MetadataRepository {
             let key = "\(element.value.year)-\(element.value.month)"
             partialResult[key] = element.value.identifiers
         }
-        return (totals, identifiers)
+        let covers = aggregates.reduce(into: [String: String]()) { partialResult, element in
+            let key = "\(element.value.year)-\(element.value.month)"
+            if let cover = element.value.coverAssetId {
+                partialResult[key] = cover
+            }
+        }
+        let dateRanges = aggregates.reduce(into: [String: MetadataSnapshot.MonthDateRange]()) { partialResult, element in
+            let key = "\(element.value.year)-\(element.value.month)"
+            if let start = element.value.earliestDate, let end = element.value.latestDate {
+                partialResult[key] = MetadataSnapshot.MonthDateRange(start: start, end: end)
+            }
+        }
+        return (totals, identifiers, covers, dateRanges)
     }
 
     func estimatedSize(for asset: PHAsset) -> Int {

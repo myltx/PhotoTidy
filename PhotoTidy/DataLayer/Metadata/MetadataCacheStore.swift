@@ -7,7 +7,7 @@ actor MetadataCacheStore {
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
-    init(fileName: String = "MetadataSnapshot_v1.json") {
+    init(fileName: String = "MetadataSnapshot_v\(MetadataSnapshot.schemaVersion).json") {
         let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         self.fileURL = cachesDirectory.appendingPathComponent(fileName)

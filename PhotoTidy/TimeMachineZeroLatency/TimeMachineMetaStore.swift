@@ -57,13 +57,18 @@ actor TimeMachineMetaStore {
 
         var updated: [String: MonthInfo] = [:]
         for (key, counts) in builder {
+            let range = snapshot.monthDateRanges[key].map {
+                MonthCleaningDateRange(start: $0.start, end: $0.end)
+            }
             let info = MonthInfo(
                 year: counts.year,
                 month: counts.month,
                 totalPhotos: counts.total,
                 skippedCount: counts.skipped,
                 pendingDeleteCount: counts.pending,
-                confirmedCount: counts.confirmed
+                confirmedCount: counts.confirmed,
+                coverAssetId: snapshot.monthCoverAssetIds[key],
+                dateRange: range
             )
             updated[key] = info
         }

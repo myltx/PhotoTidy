@@ -8,6 +8,8 @@ struct MetadataSnapshot: Codable, Equatable {
         case totalCount
         case monthTotals
         case monthMomentIdentifiers
+        case monthCoverAssetIds
+        case monthDateRanges
         case categoryCounters
         case deviceStorageUsage
         case cachedAnalysisVersion
@@ -19,6 +21,11 @@ struct MetadataSnapshot: Codable, Equatable {
         let total: Int
 
         var id: String { "\(year)-\(month)" }
+    }
+
+    struct MonthDateRange: Codable, Equatable {
+        let start: Date
+        let end: Date
     }
 
     struct CategoryCounters: Codable, Equatable {
@@ -41,13 +48,15 @@ struct MetadataSnapshot: Codable, Equatable {
         )
     }
 
-    static let schemaVersion = 1
+    static let schemaVersion = 2
 
     let schemaVersion: Int
     let generatedAt: Date
     let totalCount: Int
     let monthTotals: [MonthTotal]
     let monthMomentIdentifiers: [String: [String]]
+    let monthCoverAssetIds: [String: String]
+    let monthDateRanges: [String: MonthDateRange]
     let categoryCounters: CategoryCounters
     let deviceStorageUsage: DeviceStorageUsage
     let cachedAnalysisVersion: Int
@@ -65,6 +74,8 @@ struct MetadataSnapshot: Codable, Equatable {
         totalCount: 0,
         monthTotals: [],
         monthMomentIdentifiers: [:],
+        monthCoverAssetIds: [:],
+        monthDateRanges: [:],
         categoryCounters: .empty,
         deviceStorageUsage: .empty,
         cachedAnalysisVersion: 0,
@@ -80,9 +91,26 @@ extension MetadataSnapshot {
         totalCount = try container.decode(Int.self, forKey: .totalCount)
         monthTotals = try container.decode([MonthTotal].self, forKey: .monthTotals)
         monthMomentIdentifiers = try container.decodeIfPresent([String: [String]].self, forKey: .monthMomentIdentifiers) ?? [:]
+        monthCoverAssetIds = try container.decodeIfPresent([String: String].self, forKey: .monthCoverAssetIds) ?? [:]
+        monthDateRanges = try container.decodeIfPresent([String: MonthDateRange].self, forKey: .monthDateRanges) ?? [:]
         categoryCounters = try container.decode(CategoryCounters.self, forKey: .categoryCounters)
         deviceStorageUsage = try container.decode(DeviceStorageUsage.self, forKey: .deviceStorageUsage)
         cachedAnalysisVersion = try container.decode(Int.self, forKey: .cachedAnalysisVersion)
         needsBootstrap = try container.decode(Bool.self, forKey: .needsBootstrap)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(generatedAt, forKey: .generatedAt)
+        try container.encode(totalCount, forKey: .totalCount)
+        try container.encode(monthTotals, forKey: .monthTotals)
+        try container.encode(monthMomentIdentifiers, forKey: .monthMomentIdentifiers)
+        try container.encode(monthCoverAssetIds, forKey: .monthCoverAssetIds)
+        try container.encode(monthDateRanges, forKey: .monthDateRanges)
+        try container.encode(categoryCounters, forKey: .categoryCounters)
+        try container.encode(deviceStorageUsage, forKey: .deviceStorageUsage)
+        try container.encode(cachedAnalysisVersion, forKey: .cachedAnalysisVersion)
+        try container.encode(needsBootstrap, forKey: .needsBootstrap)
     }
 }

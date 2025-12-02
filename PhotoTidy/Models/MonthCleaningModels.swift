@@ -1,5 +1,10 @@
 import Foundation
 
+struct MonthCleaningDateRange: Equatable {
+    let start: Date
+    let end: Date
+}
+
 enum CleaningStatus: String, Codable {
     case notStarted
     case inProgress
@@ -26,6 +31,8 @@ struct MonthInfo: Identifiable, Equatable {
     let confirmedCount: Int
     var status: CleaningStatus
     var progress: Double    // 0.0 ~ 1.0
+    var coverAssetId: String?
+    var dateRange: MonthCleaningDateRange?
 
     var id: String { "\(year)-\(month)" }
     var processedCount: Int { skippedCount + pendingDeleteCount + confirmedCount }
@@ -37,7 +44,9 @@ struct MonthInfo: Identifiable, Equatable {
         totalPhotos: Int,
         skippedCount: Int,
         pendingDeleteCount: Int,
-        confirmedCount: Int
+        confirmedCount: Int,
+        coverAssetId: String? = nil,
+        dateRange: MonthCleaningDateRange? = nil
     ) {
         self.year = year
         self.month = month
@@ -45,6 +54,8 @@ struct MonthInfo: Identifiable, Equatable {
         self.skippedCount = skippedCount
         self.pendingDeleteCount = pendingDeleteCount
         self.confirmedCount = confirmedCount
+        self.coverAssetId = coverAssetId
+        self.dateRange = dateRange
         let analysis = analyzeMonthCleaningStatus(
             totalPhotos: totalPhotos,
             skippedCount: skippedCount,
