@@ -193,9 +193,18 @@ private var hasScheduledInitialAssetLoad = false
             PhotoCleanupViewModel.shared = nil
         }
         PHPhotoLibrary.shared().unregisterChangeObserver(self)
-        Task { await taskPool.cancelAll() }
-        Task { await backgroundScheduler.cancelAll() }
-        Task { await resetLargeImagePipeline() }
+        let pool = taskPool
+        let scheduler = backgroundScheduler
+        let pager = largeImagePager
+        Task.detached {
+            await pool.cancelAll()
+        }
+        Task.detached {
+            await scheduler.cancelAll()
+        }
+        Task.detached {
+            await pager.configure(assets: [], targetSize: .zero)
+        }
     }
 
     private func setupMetadataPipeline() {
