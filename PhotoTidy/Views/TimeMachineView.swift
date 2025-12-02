@@ -51,7 +51,7 @@ struct TimeMachineView: View {
     }
 
     private var content: some View {
-        Group {
+        ZStack {
             if displayedSections.isEmpty {
                 EmptyTimelineView()
                     .padding(.horizontal, 20)
@@ -59,17 +59,17 @@ struct TimeMachineView: View {
             } else {
                 ScrollView {
                     VStack(spacing: 24) {
-                    ForEach(displayedSections) { section in
-                        VStack(alignment: .leading, spacing: 10) {
-                            MonthGridHeader(
-                                title: "\(section.year) 年",
-                                primary: section.year == displayedSections.first?.year
-                            )
-                            MonthGridView(section: section, columns: squareColumns) { info in
-                                handleMonthSelection(info)
+                        ForEach(displayedSections) { section in
+                            VStack(alignment: .leading, spacing: 10) {
+                                MonthGridHeader(
+                                    title: "\(section.year) 年",
+                                    primary: section.year == displayedSections.first?.year
+                                )
+                                MonthGridView(section: section, columns: squareColumns) { info in
+                                    handleMonthSelection(info)
+                                }
                             }
                         }
-                    }
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 20)
@@ -79,6 +79,11 @@ struct TimeMachineView: View {
                     transaction.animation = nil
                 }
                 .background(Color(UIColor.systemGray6).opacity(0.65))
+            }
+        }
+        .overlay {
+            if zeroLatencyTimelineViewModel.isLoading {
+                LoadingOverlay()
             }
         }
     }
@@ -384,6 +389,28 @@ private struct LegendItem: View {
                 .font(.caption2.weight(.bold))
             
                 .foregroundColor(.secondary)
+        }
+    }
+}
+
+private struct LoadingOverlay: View {
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.25)
+                .ignoresSafeArea()
+            VStack(spacing: 12) {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .scaleEffect(1.1)
+                Text("正在准备时光机数据…")
+                    .font(.headline)
+                Text("首次统计需要一点时间，请稍候")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            }
+            .padding(28)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .shadow(color: Color.black.opacity(0.15), radius: 20, y: 10)
         }
     }
 }

@@ -34,7 +34,7 @@ final class TimeMachineZeroLatencyViewModel: ObservableObject {
             self.metadataRepository = MetadataRepository(analysisCache: analysisCache)
         }
         self.sections = TimeMachineZeroLatencyViewModel.makePlaceholderSections(yearsBack: placeholderYears)
-        metadataRepository.$snapshot
+        self.metadataRepository.$snapshot
             .receive(on: DispatchQueue.main)
             .sink { [weak self] snapshot in
                 guard let self else { return }

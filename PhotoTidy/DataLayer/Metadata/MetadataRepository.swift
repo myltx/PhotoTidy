@@ -12,6 +12,7 @@ final class MetadataRepository: NSObject, ObservableObject, PHPhotoLibraryChange
     private var fetchResult: PHFetchResult<PHAsset>?
     private var isRefreshing = false
     private var needsBootstrap = true
+    private var hasScheduledDeferredRefresh = false
 
     init(
         cacheStore: MetadataCacheStore = MetadataCacheStore(),
@@ -35,14 +36,11 @@ final class MetadataRepository: NSObject, ObservableObject, PHPhotoLibraryChange
     }
 
     func bootstrapIfNeeded() {
-        guard !isRefreshing else { return }
         guard PHPhotoLibrary.authorizationStatus(for: .readWrite).isAuthorized else { return }
-        isRefreshing = true
-        processingQueue.async { [weak self] in
-            guard let self else { return }
-            self.prepareFetchResultIfNeeded()
-            self.generateSnapshot()
-            self.isRefreshing = false
+        if needsBootstrap {
+            startImmediateRefresh()
+        } else {
+            scheduleDeferredRefresh()
         }
     }
 
@@ -125,7 +123,29 @@ final class MetadataRepository: NSObject, ObservableObject, PHPhotoLibraryChange
             await MainActor.run {
                 self.snapshot = snapshot
                 self.needsBootstrap = snapshot.needsBootstrap
+                if !snapshot.needsBootstrap {
+                    self.hasScheduledDeferredRefresh = false
+                }
             }
+        }
+    }
+
+    private func startImmediateRefresh() {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        processingQueue.async { [weak self] in
+            guard let self else { return }
+            self.prepareFetchResultIfNeeded()
+            self.generateSnapshot()
+            self.isRefreshing = false
+        }
+    }
+
+    private func scheduleDeferredRefresh() {
+        guard !hasScheduledDeferredRefresh else { return }
+        hasScheduledDeferredRefresh = true
+        processingQueue.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.startImmediateRefresh()
         }
     }
 }
