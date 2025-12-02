@@ -11,12 +11,30 @@ struct PhotoCardView: View {
         ZStack(alignment: .topLeading) {
             Color(UIColor.secondarySystemBackground)
 
-            AssetRichPreviewView(
-                asset: item.asset,
-                imageManager: viewModel.imageManager,
-                contentMode: .aspectFit
-            )
-            .padding(6)
+            if viewModel.isZeroLatencyTimeMachineSession {
+                if let image = viewModel.cachedLargeImage(for: item.id) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.black.opacity(0.9))
+                        .padding(6)
+                } else {
+                    ZStack {
+                        Color.black.opacity(0.15)
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                    }
+                    .padding(6)
+                }
+            } else {
+                AssetRichPreviewView(
+                    asset: item.asset,
+                    imageManager: viewModel.imageManager,
+                    contentMode: .aspectFit
+                )
+                .padding(6)
+            }
 
             LinearGradient(
                 colors: [.black.opacity(0.5), .clear],

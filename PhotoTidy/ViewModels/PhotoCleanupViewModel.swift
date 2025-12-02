@@ -25,6 +25,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     @Published var deviceStorageUsage: DeviceStorageUsage = .empty
     @Published private(set) var metadataSnapshot: MetadataSnapshot = .empty
     @Published private(set) var timeMachineSnapshots: [String: TimeMachineMonthProgress] = [:]
+    @Published private(set) var largeImageCache: [String: UIImage] = [:]
     @Published var albumFilters: [AlbumFilter] = [.all]
     @Published var selectedAlbumFilter: AlbumFilter = .all
     
@@ -39,6 +40,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     @Published var currentIndex: Int = 0 {
         didSet {
             captureSmartCleanupAnchor()
+            updateLargeImageWindowIfNeeded(center: currentIndex)
         }
     }
     private var activeMonthContext: (year: Int, month: Int)?
@@ -54,6 +56,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     private let metadataRepository: MetadataRepository
     private let photoRepository = PhotoRepository()
     private let imagePipeline = ImagePipeline()
+    private let largeImagePager = LargeImagePager()
     private let taskPool = TaskPool()
     private let backgroundScheduler = BackgroundJobScheduler()
     private var assetsFetchResult: PHFetchResult<PHAsset>?
@@ -80,6 +83,14 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     var currentItem: PhotoItem? { sessionItems[safe: currentIndex] }
     var nextItem: PhotoItem? { sessionItems[safe: currentIndex + 1] }
     var thirdItem: PhotoItem? { sessionItems[safe: currentIndex + 2] }
+
+    var isZeroLatencyTimeMachineSession: Bool {
+        FeatureToggles.useZeroLatencyTimeMachine && activeMonthContext != nil
+    }
+
+    func cachedLargeImage(for id: String) -> UIImage? {
+        largeImageCache[id]
+    }
     
     struct SmartCleanupResumeInfo {
         let lastCategory: CleanupFilterMode
@@ -261,31 +272,24 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         isShowingCleaner = true
     }
 
-    @MainActor
-    func prepareSession(with assets: [PHAsset], month: MonthInfo) async -> Bool {
+    func prepareSession(with assets: [PHAsset], month: MonthInfo) -> Bool {
         guard !assets.isEmpty else { return false }
-        await MainActor.run { self.isLoading = true }
-        let preparedItems = await Task.detached(priority: .userInitiated) { [weak self] () -> [PhotoItem] in
-            guard let self else { return [] }
-            return self.buildPhotoItems(from: assets)
-        }.value
+        isLoading = true
+        let preparedItems = buildPhotoItems(from: assets)
         guard !preparedItems.isEmpty else {
-            await MainActor.run { self.isLoading = false }
+            isLoading = false
             return false
         }
-        await MainActor.run {
-            var restored = preparedItems
-            self.restoreSelectionStates(in: &restored)
-            self.integratePreparedItems(restored)
-            self.hasInitializedSession = true
-            self.activeMonthContext = (month.year, month.month)
-            self.sessionItems = restored
-            self.sessionItemIds = Set(restored.map(\.id))
-            self.currentFilter = .all
-            self.currentIndex = 0
-            self.isShowingCleaner = true
-            self.isLoading = false
-        }
+        integratePreparedItems(preparedItems)
+        hasInitializedSession = true
+        activeMonthContext = (month.year, month.month)
+        sessionItems = preparedItems
+        sessionItemIds = Set(preparedItems.map(\.id))
+        currentFilter = .all
+        currentIndex = 0
+        isShowingCleaner = true
+        isLoading = false
+        configureLargeImagePipeline()
         return true
     }
     
@@ -1403,7 +1407,7 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
         }
     }
 
-    nonisolated func buildPhotoItems(from assets: [PHAsset]) -> [PhotoItem] {
+    private func buildPhotoItems(from assets: [PHAsset]) -> [PhotoItem] {
         guard !assets.isEmpty else { return [] }
         let cacheEntries = analysisCache.snapshot()
         var incoming: [PhotoItem] = []
@@ -1418,6 +1422,7 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
             }
             incoming.append(item)
         }
+        restoreSelectionStates(in: &incoming)
         return incoming.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
     }
 
@@ -1436,5 +1441,39 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
                 items.append(item)
             }
         }
+    }
+
+    private func configureLargeImagePipeline() {
+        guard isZeroLatencyTimeMachineSession else {
+            largeImageCache.removeAll()
+            return
+        }
+        let assets = sessionItems.map(\.asset)
+        let target = largeImageTargetSize
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            await self.largeImagePager.configure(assets: assets, targetSize: target)
+            let cache = await self.largeImagePager.ensureWindow(centerIndex: self.currentIndex)
+            await MainActor.run {
+                self.largeImageCache = cache
+            }
+        }
+    }
+
+    private func updateLargeImageWindowIfNeeded(center: Int) {
+        guard isZeroLatencyTimeMachineSession else { return }
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            let cache = await self.largeImagePager.ensureWindow(centerIndex: center)
+            await MainActor.run {
+                self.largeImageCache = cache
+            }
+        }
+    }
+
+    private var largeImageTargetSize: CGSize {
+        let bounds = UIScreen.main.bounds
+        let scale = UIScreen.main.scale
+        return CGSize(width: bounds.width * scale, height: bounds.height * scale)
     }
 }
