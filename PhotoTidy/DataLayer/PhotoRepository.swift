@@ -109,19 +109,33 @@ actor PhotoRepository {
         let assetOptions = PHFetchOptions()
         assetOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
 
-        collections.enumerateObjects { collection, _, stop in
+        var cancelled = false
+        collections.enumerateObjects { collection, _, stopCollections in
+            if Task.isCancelled {
+                cancelled = true
+                stopCollections.pointee = true
+                return
+            }
             let assets = PHAsset.fetchAssets(in: collection, options: assetOptions)
             assets.enumerateObjects { asset, _, stopAssets in
+                if Task.isCancelled {
+                    cancelled = true
+                    stopAssets.pointee = true
+                    return
+                }
                 if seen.contains(asset.localIdentifier) { return }
                 descriptors.append(AssetDescriptor(asset: asset))
                 seen.insert(asset.localIdentifier)
                 if let limit, descriptors.count >= limit {
                     stopAssets.pointee = true
-                    stop.pointee = true
+                    stopCollections.pointee = true
                 }
             }
+            if cancelled {
+                stopCollections.pointee = true
+            }
         }
-        return descriptors
+        return cancelled ? [] : descriptors
     }
 
     func assets(for identifiers: [String]) async -> [PHAsset] {
@@ -129,10 +143,16 @@ actor PhotoRepository {
         let result = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
         var assets: [PHAsset] = []
         assets.reserveCapacity(result.count)
-        result.enumerateObjects { asset, _, _ in
+        var cancelled = false
+        result.enumerateObjects { asset, _, stop in
+            if Task.isCancelled {
+                cancelled = true
+                stop.pointee = true
+                return
+            }
             assets.append(asset)
         }
-        return assets
+        return cancelled ? [] : assets
     }
 
     func assetIdentifiers(forMonth year: Int, month: Int) async -> [String] {
@@ -140,10 +160,16 @@ actor PhotoRepository {
         let query = PhotoQuery(scope: .month(year: year, month: month))
         guard let fetchResult = fetchResult(for: query) ?? makeFetchResult(for: query) else { return [] }
         var identifiers: [String] = []
-        fetchResult.enumerateObjects { asset, _, _ in
+        var cancelled = false
+        fetchResult.enumerateObjects { asset, _, stop in
+            if Task.isCancelled {
+                cancelled = true
+                stop.pointee = true
+                return
+            }
             identifiers.append(asset.localIdentifier)
         }
-        return identifiers
+        return cancelled ? [] : identifiers
     }
 
     func assetIdentifiers(forMomentIdentifiers identifiers: [String]) async -> [String] {
@@ -151,13 +177,27 @@ actor PhotoRepository {
         guard !identifiers.isEmpty else { return [] }
         let collections = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: identifiers, options: nil)
         var ids: [String] = []
-        collections.enumerateObjects { collection, _, _ in
+        var cancelled = false
+        collections.enumerateObjects { collection, _, stopCollections in
+            if Task.isCancelled {
+                cancelled = true
+                stopCollections.pointee = true
+                return
+            }
             let assets = PHAsset.fetchAssets(in: collection, options: nil)
-            assets.enumerateObjects { asset, _, _ in
+            assets.enumerateObjects { asset, _, stopAssets in
+                if Task.isCancelled {
+                    cancelled = true
+                    stopAssets.pointee = true
+                    return
+                }
                 ids.append(asset.localIdentifier)
             }
+            if cancelled {
+                stopCollections.pointee = true
+            }
         }
-        return ids
+        return cancelled ? [] : ids
     }
 
     func assetIdentifiersFromMoments(year: Int, month: Int) async -> [String] {
@@ -165,16 +205,30 @@ actor PhotoRepository {
         let calendar = Calendar.current
         let moments = PHAssetCollection.fetchAssetCollections(with: .moment, subtype: .any, options: nil)
         var identifiers: [String] = []
-        moments.enumerateObjects { collection, _, _ in
+        var cancelled = false
+        moments.enumerateObjects { collection, _, stopCollections in
+            if Task.isCancelled {
+                cancelled = true
+                stopCollections.pointee = true
+                return
+            }
             guard let start = collection.startDate ?? collection.endDate else { return }
             let comps = calendar.dateComponents([.year, .month], from: start)
             guard comps.year == year, comps.month == month else { return }
             let assets = PHAsset.fetchAssets(in: collection, options: nil)
-            assets.enumerateObjects { asset, _, _ in
+            assets.enumerateObjects { asset, _, stopAssets in
+                if Task.isCancelled {
+                    cancelled = true
+                    stopAssets.pointee = true
+                    return
+                }
                 identifiers.append(asset.localIdentifier)
             }
+            if cancelled {
+                stopCollections.pointee = true
+            }
         }
-        return identifiers
+        return cancelled ? [] : identifiers
     }
 
     private func fetchResult(for query: PhotoQuery) -> PHFetchResult<PHAsset>? {
@@ -231,11 +285,16 @@ actor PhotoRepository {
         guard !range.isEmpty else { return [] }
         var descriptors: [AssetDescriptor] = []
         descriptors.reserveCapacity(range.count)
+        var cancelled = false
         for index in range {
+            if Task.isCancelled {
+                cancelled = true
+                break
+            }
             guard index < fetchResult.count else { break }
             let asset = fetchResult.object(at: index)
             descriptors.append(AssetDescriptor(asset: asset))
         }
-        return descriptors
+        return cancelled ? [] : descriptors
     }
 }

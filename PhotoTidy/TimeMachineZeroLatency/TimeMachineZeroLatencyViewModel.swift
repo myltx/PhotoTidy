@@ -19,6 +19,8 @@ final class TimeMachineZeroLatencyViewModel: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private var latestSnapshot: MetadataSnapshot = .empty
     private let placeholderYears = 4
+    private var sessionPreparationTask: Task<SessionPreparationResult, Never>?
+    private var sessionPreparationToken: UUID?
 
     init() {
         self.metadataRepository = MetadataRepository(analysisCache: analysisCache)
@@ -86,12 +88,38 @@ final class TimeMachineZeroLatencyViewModel: ObservableObject {
         makeDetailViewModel(for: month, autoLoad: true)
     }
 
-    func prepareSession(for month: MonthInfo) async -> Bool {
-        guard let cleanup = PhotoCleanupViewModel.shared else { return false }
+    func prepareSession(for month: MonthInfo) async -> SessionPreparationResult {
+        cancelSessionPreparation()
+        let token = UUID()
+        sessionPreparationToken = token
+        let task = Task<SessionPreparationResult, Never> { [weak self] in
+            guard let self else { return .failed }
+            return await self.prepareSessionInternal(for: month)
+        }
+        sessionPreparationTask = task
+        let result = await task.value
+        if sessionPreparationToken == token {
+            sessionPreparationTask = nil
+            sessionPreparationToken = nil
+        }
+        return result
+    }
+
+    func cancelSessionPreparation() {
+        sessionPreparationTask?.cancel()
+        sessionPreparationTask = nil
+        sessionPreparationToken = nil
+    }
+
+    private func prepareSessionInternal(for month: MonthInfo) async -> SessionPreparationResult {
+        let cleanup = await MainActor.run { PhotoCleanupViewModel.shared }
+        guard let cleanup else { return .failed }
         let identifiers = await ensureAssetIdentifiers(for: month)
-        guard !identifiers.isEmpty else { return false }
+        guard !Task.isCancelled else { return .cancelled }
+        guard !identifiers.isEmpty else { return .failed }
         let assets = await photoRepository.assets(for: identifiers)
-        guard !assets.isEmpty else { return false }
+        guard !Task.isCancelled else { return .cancelled }
+        guard !assets.isEmpty else { return .failed }
         return await cleanup.prepareSession(with: assets, month: month)
     }
 
@@ -146,6 +174,7 @@ final class TimeMachineZeroLatencyViewModel: ObservableObject {
             return cached
         }
         let ids = await resolveAssetIdentifiers(for: month)
+        if Task.isCancelled { return [] }
         await assetIndexStore.cache(ids: ids, for: key)
         return ids
     }

@@ -41,6 +41,17 @@ struct TimeMachineView: View {
                 zeroLatencyTimelineViewModel.onAppear()
             }
         }
+        .onChange(of: viewModel.isShowingCleaner) { isShowing in
+            guard FeatureToggles.useZeroLatencyTimeMachine else { return }
+            if !isShowing {
+                zeroLatencyTimelineViewModel.cancelSessionPreparation()
+            }
+        }
+        .onDisappear {
+            if FeatureToggles.useZeroLatencyTimeMachine {
+                zeroLatencyTimelineViewModel.cancelSessionPreparation()
+            }
+        }
     }
 
     private var content: some View {
@@ -138,12 +149,15 @@ private extension TimeMachineView {
     func handleMonthSelection(_ info: MonthInfo) {
         if FeatureToggles.useZeroLatencyTimeMachine {
             Task(priority: .userInitiated) {
-                let success = await zeroLatencyTimelineViewModel.prepareSession(for: info)
+                let result = await zeroLatencyTimelineViewModel.prepareSession(for: info)
                 await MainActor.run {
-                    if success {
+                    switch result {
+                    case .success:
+                        break
+                    case .failed:
                         viewModel.showCleaner(forMonth: info.year, month: info.month)
-                    } else {
-                        viewModel.showCleaner(forMonth: info.year, month: info.month)
+                    case .cancelled:
+                        break
                     }
                 }
             }

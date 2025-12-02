@@ -4,6 +4,12 @@ import Photos
 import Vision
 import UIKit
 
+enum SessionPreparationResult {
+    case success
+    case cancelled
+    case failed
+}
+
 final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
     static weak var shared: PhotoCleanupViewModel?
     // MARK: - Properties
@@ -25,8 +31,8 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     @Published var lastDeletedItemsCount: Int = 0
     @Published var deviceStorageUsage: DeviceStorageUsage = .empty
     @Published private(set) var metadataSnapshot: MetadataSnapshot = .empty
-    @Published private(set) var timeMachineSnapshots: [String: TimeMachineMonthProgress] = [:]
-    @Published private(set) var largeImageCache: [String: UIImage] = [:]
+@Published private(set) var timeMachineSnapshots: [String: TimeMachineMonthProgress] = [:]
+@Published private(set) var largeImageCache: [String: UIImage] = [:]
     @Published var albumFilters: [AlbumFilter] = [.all]
     @Published var selectedAlbumFilter: AlbumFilter = .all
     
@@ -62,7 +68,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     private let backgroundScheduler = BackgroundJobScheduler()
     private var assetsFetchResult: PHFetchResult<PHAsset>?
     private var cancellables: Set<AnyCancellable> = []
-    private let zeroLatencyImageCache = ImageCache()
+private let zeroLatencyImageCache = ImageCache()
     private lazy var pagingLoader: PhotoLoader = {
         let loader = PhotoLoader(imageCache: zeroLatencyImageCache)
         loader.delegate = self
@@ -76,7 +82,9 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     private var selectedAlbumAssetIds: Set<String>?
     private var hasLoadedAlbumFilters = false
     private var monthPrefetchingKeys: Set<String> = []
-    private var hasScheduledInitialAssetLoad = false
+private var hasScheduledInitialAssetLoad = false
+    private var sessionPreparationTask: Task<SessionPreparationResult, Never>?
+    private var sessionPreparationToken: UUID?
 
     // MARK: - Computed Properties
     
@@ -274,8 +282,41 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         isShowingCleaner = true
     }
 
-    func prepareSession(with assets: [PHAsset], month: MonthInfo) async -> Bool {
-        guard !assets.isEmpty else { return false }
+    func prepareSession(with assets: [PHAsset], month: MonthInfo) async -> SessionPreparationResult {
+        guard !assets.isEmpty else { return .failed }
+        cancelSessionPreparation()
+        let token = UUID()
+        sessionPreparationToken = token
+        let task = Task(priority: .userInitiated) { [weak self] () -> SessionPreparationResult in
+            guard let self else { return .failed }
+            return await self.prepareSessionInternal(assets: assets, month: month)
+        }
+        sessionPreparationTask = task
+        let result = await task.value
+        if sessionPreparationToken == token {
+            sessionPreparationTask = nil
+            sessionPreparationToken = nil
+        }
+        return result
+    }
+    
+    func hideCleaner() {
+        isShowingCleaner = false
+        activeMonthContext = nil
+        cancelSessionPreparation()
+        Task { await resetLargeImagePipeline() }
+    }
+
+    func showDetail(_ detail: DashboardDetail) {
+        ensureRealAssetPipeline()
+        activeDetail = detail
+    }
+
+    func dismissDetail() {
+        activeDetail = nil
+    }
+
+    private func prepareSessionInternal(assets: [PHAsset], month: MonthInfo) async -> SessionPreparationResult {
         await MainActor.run {
             self.activeMonthContext = (month.year, month.month)
             self.sessionItems = []
@@ -286,15 +327,14 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             self.isLoading = true
         }
         let cacheSnapshot = analysisCache.snapshot()
-        let preparedItems = await Task.detached(priority: .userInitiated) { [assets] () -> [PhotoItem] in
-            PhotoCleanupViewModel.buildZeroLatencyItems(from: assets, cache: cacheSnapshot)
-        }.value
+        let preparedItems = PhotoCleanupViewModel.buildZeroLatencyItems(from: assets, cache: cacheSnapshot)
+        if Task.isCancelled { return .cancelled }
         guard !preparedItems.isEmpty else {
             await MainActor.run {
                 self.isShowingCleaner = false
                 self.isLoading = false
             }
-            return false
+            return .failed
         }
         await MainActor.run {
             self.integratePreparedItems(preparedItems)
@@ -304,24 +344,11 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             self.currentFilter = .all
             self.currentIndex = 0
         }
-        Task { [weak self] in await self?.configureLargeImagePipeline() }
+        if Task.isCancelled { return .cancelled }
+        await configureLargeImagePipeline()
+        if Task.isCancelled { return .cancelled }
         await MainActor.run { self.isLoading = false }
-        return true
-    }
-    
-    func hideCleaner() {
-        isShowingCleaner = false
-        activeMonthContext = nil
-        resetLargeImagePipeline()
-    }
-
-    func showDetail(_ detail: DashboardDetail) {
-        ensureRealAssetPipeline()
-        activeDetail = detail
-    }
-
-    func dismissDetail() {
-        activeDetail = nil
+        return .success
     }
 
     // MARK: - Session Management
@@ -515,7 +542,15 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         currentIndex = 0
         currentFilter = .all
         Task { await taskPool.cancel(scope: .prefetch) }
-        resetLargeImagePipeline()
+        Task { await taskPool.cancel(scope: .prefetch) }
+        cancelSessionPreparation()
+        Task { await resetLargeImagePipeline() }
+    }
+
+    private func cancelSessionPreparation() {
+        sessionPreparationTask?.cancel()
+        sessionPreparationTask = nil
+        sessionPreparationToken = nil
     }
 
     private func ingestAssets(_ assets: [PHAsset]) {
@@ -1437,6 +1472,7 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
         let cacheEntries = analysisCache.snapshot()
         var incoming: [PhotoItem] = []
         for asset in assets {
+            if Task.isCancelled { return [] }
             let estimatedSize = PhotoCleanupViewModel.assetResourceSizeStatic(for: asset)
             var item = photoItem(for: asset, estimatedSize: estimatedSize)
             let id = item.id
@@ -1455,6 +1491,7 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
         guard !assets.isEmpty else { return [] }
         var incoming: [PhotoItem] = []
         for asset in assets {
+            if Task.isCancelled { return [] }
             let estimatedSize = assetResourceSizeStatic(for: asset)
             var item = Self.makePhotoItem(for: asset, estimatedSize: estimatedSize)
             let id = item.id
@@ -1487,8 +1524,7 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
 
     private func configureLargeImagePipeline() async {
         guard isZeroLatencyTimeMachineSession else {
-            await largeImagePager.configure(assets: [], targetSize: .zero)
-            await MainActor.run { self.largeImageCache.removeAll() }
+            await resetLargeImagePipeline()
             return
         }
         let assets = sessionItems.map(\.asset)
@@ -1518,13 +1554,11 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
         return CGSize(width: bounds.width * scale, height: bounds.height * scale)
     }
 
-    private func resetLargeImagePipeline() {
-        Task {
-            await largeImagePager.configure(assets: [], targetSize: .zero)
-            await MainActor.run {
-                guard PhotoCleanupViewModel.shared === self else { return }
-                self.largeImageCache.removeAll()
-            }
+    private func resetLargeImagePipeline() async {
+        await largeImagePager.configure(assets: [], targetSize: .zero)
+        await MainActor.run {
+            guard PhotoCleanupViewModel.shared === self else { return }
+            self.largeImageCache.removeAll()
         }
     }
 }
