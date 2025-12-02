@@ -2,13 +2,11 @@ import SwiftUI
 
 struct TimeMachineView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
-    @StateObject private var timelineViewModel: TimeMachineTimelineViewModel
     @State private var showingResetAlert = false
     @StateObject private var zeroLatencyTimelineViewModel = TimeMachineZeroLatencyViewModel()
 
     init(viewModel: PhotoCleanupViewModel) {
         self.viewModel = viewModel
-        _timelineViewModel = StateObject(wrappedValue: TimeMachineTimelineViewModel(dataSource: viewModel))
     }
 
     private let squareColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 6)
@@ -37,20 +35,15 @@ struct TimeMachineView: View {
             Text("将清除待删与已确认记录，重新开始按月份整理。")
         }
         .onAppear {
-            if FeatureToggles.useZeroLatencyTimeMachine {
-                zeroLatencyTimelineViewModel.onAppear()
-            }
+            zeroLatencyTimelineViewModel.onAppear()
         }
         .onChange(of: viewModel.isShowingCleaner) { isShowing in
-            guard FeatureToggles.useZeroLatencyTimeMachine else { return }
             if !isShowing {
                 zeroLatencyTimelineViewModel.cancelSessionPreparation()
             }
         }
         .onDisappear {
-            if FeatureToggles.useZeroLatencyTimeMachine {
-                zeroLatencyTimelineViewModel.cancelSessionPreparation()
-            }
+            zeroLatencyTimelineViewModel.cancelSessionPreparation()
         }
     }
 
@@ -135,61 +128,45 @@ private extension TimeMachineView {
 }
 
 private extension TimeMachineView {
-    var displayedSections: [TimeMachineTimelineViewModel.YearSection] {
-        if FeatureToggles.useZeroLatencyTimeMachine {
-            let raw = zeroLatencyTimelineViewModel.sections.map {
-                TimeMachineTimelineViewModel.YearSection(year: $0.year, months: $0.months)
-            }
-            return normalizedSections(from: raw)
-        } else {
-            return normalizedSections(from: timelineViewModel.sections)
-        }
+    var displayedSections: [TimeMachineMonthSection] {
+        normalizedSections(from: zeroLatencyTimelineViewModel.sections)
     }
 
     func handleMonthSelection(_ info: MonthInfo) {
-        if FeatureToggles.useZeroLatencyTimeMachine {
-            Task(priority: .userInitiated) {
-                let result = await zeroLatencyTimelineViewModel.prepareSession(for: info)
-                await MainActor.run {
-                    switch result {
-                    case .success:
-                        break
-                    case .failed:
-                        viewModel.showCleaner(forMonth: info.year, month: info.month)
-                    case .cancelled:
-                        break
-                    }
+        Task(priority: .userInitiated) {
+            let result = await zeroLatencyTimelineViewModel.prepareSession(for: info)
+            await MainActor.run {
+                switch result {
+                case .success:
+                    break
+                case .failed:
+                    viewModel.showCleaner(forMonth: info.year, month: info.month)
+                case .cancelled:
+                    break
                 }
             }
-        } else {
-            viewModel.showCleaner(forMonth: info.year, month: info.month)
         }
     }
 
-    func normalizedSections(from sections: [TimeMachineTimelineViewModel.YearSection]) -> [TimeMachineTimelineViewModel.YearSection] {
+    func normalizedSections(from sections: [TimeMachineMonthSection]) -> [TimeMachineMonthSection] {
         guard !sections.isEmpty else { return [] }
-        var normalized: [TimeMachineTimelineViewModel.YearSection] = []
+        var normalized: [TimeMachineMonthSection] = []
         let years = sections.map(\.year).sorted(by: >)
         let sectionMap = Dictionary(uniqueKeysWithValues: sections.map { ($0.year, $0.months) })
         for year in years {
             let months = sectionMap[year] ?? []
             let monthMap = Dictionary(uniqueKeysWithValues: months.map { ($0.month, $0) })
-            var filled: [MonthInfo] = []
-            for month in 1...12 {
-                if let info = monthMap[month] {
-                    filled.append(info)
-                } else {
-                    filled.append(MonthInfo(
-                        year: year,
-                        month: month,
-                        totalPhotos: 0,
-                        skippedCount: 0,
-                        pendingDeleteCount: 0,
-                        confirmedCount: 0
-                    ))
-                }
+            let filled: [MonthInfo] = (1...12).map { month in
+                monthMap[month] ?? MonthInfo(
+                    year: year,
+                    month: month,
+                    totalPhotos: 0,
+                    skippedCount: 0,
+                    pendingDeleteCount: 0,
+                    confirmedCount: 0
+                )
             }
-            normalized.append(TimeMachineTimelineViewModel.YearSection(year: year, months: filled))
+            normalized.append(TimeMachineMonthSection(year: year, months: filled))
         }
         return normalized
     }
@@ -224,7 +201,7 @@ private struct MonthGridHeader: View {
 }
 
 private struct MonthGridView: View {
-    let section: TimeMachineTimelineViewModel.YearSection
+    let section: TimeMachineMonthSection
     let columns: [GridItem]
     var onSelect: (MonthInfo) -> Void
 
@@ -280,7 +257,6 @@ private struct MonthSquare: View {
                 .aspectRatio(1, contentMode: .fit)
         }
         .buttonStyle(.plain)
-        .disabled(!info.hasContent && !FeatureToggles.useZeroLatencyTimeMachine)
     }
 
     private var monthLabel: String {
