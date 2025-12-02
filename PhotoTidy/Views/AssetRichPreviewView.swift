@@ -7,7 +7,6 @@ import ImageIO
 /// 展示照片/视频/实况/动图的富预览视图，用于清理器等需要直接操作原资源的场景。
 struct AssetRichPreviewView: View {
     let asset: PHAsset
-    let imageManager: PHCachingImageManager
     var contentMode: PHImageContentMode = .aspectFit
 
     @State private var player: AVPlayer?
@@ -92,13 +91,13 @@ struct AssetRichPreviewView: View {
                         Spacer()
                     }
                 } else {
-                    AssetThumbnailView(asset: asset, imageManager: imageManager, contentMode: contentMode)
+                    AssetThumbnailView(asset: asset, target: .detailFit)
                         .frame(height: 260)
                 }
             }
         case .livePhoto:
             ZStack {
-                AssetThumbnailView(asset: asset, imageManager: imageManager, contentMode: contentMode)
+                AssetThumbnailView(asset: asset, target: .detailFit)
                     .opacity(isLivePhotoPlaying ? 0 : 1)
                 if isLivePhotoPlaying {
                     LivePhotoPlayerView(asset: asset, isPlaying: $isLivePhotoPlaying)
@@ -111,14 +110,10 @@ struct AssetRichPreviewView: View {
                     .aspectRatio(contentMode: .fit)
                     .background(Color.black.opacity(0.05))
             } else {
-                AssetThumbnailView(asset: asset, imageManager: imageManager, contentMode: contentMode)
+                AssetThumbnailView(asset: asset, target: .detailFit)
             }
         default:
-            AssetThumbnailView(
-                asset: asset,
-                imageManager: imageManager,
-                contentMode: contentMode
-            )
+            AssetThumbnailView(asset: asset, target: .detailFit)
         }
     }
 

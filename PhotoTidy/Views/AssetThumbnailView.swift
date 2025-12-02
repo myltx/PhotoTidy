@@ -3,19 +3,25 @@ import SwiftUI
 import Photos
 import UIKit
 
+/// 统一的缩略图视图，优先使用 ThumbnailStore，必要时回退到 PhotoKit
 struct AssetThumbnailView: View {
     let asset: PHAsset
-    let imageManager: PHCachingImageManager
-    var contentMode: PHImageContentMode = .aspectFill
+    var target: ThumbnailTarget
 
     @State private var uiImage: UIImage?
+    @State private var loadTask: Task<Void, Never>?
+
+    init(asset: PHAsset, target: ThumbnailTarget = .dashboardCard) {
+        self.asset = asset
+        self.target = target
+    }
 
     var body: some View {
         Color.clear
             .overlay(
                 Group {
                     if let image = uiImage {
-                        if contentMode == .aspectFill {
+                        if target.contentMode == .aspectFill {
                             Image(uiImage: image)
                                 .resizable()
                                 .aspectRatio(contentMode: .fill)
@@ -29,42 +35,59 @@ struct AssetThumbnailView: View {
                         }
                     } else {
                         Rectangle()
-                            .fill(Color.gray.opacity(0.2))
+                            .fill(Color.gray.opacity(0.18))
                             .overlay(
-                                ProgressView().scaleEffect(0.8)
+                                ProgressView().scaleEffect(0.7)
                             )
                     }
                 }
             )
             .onAppear {
-                request()
+                loadThumbnail()
             }
-        // 当绑定的 PHAsset 发生变化时，重置并重新请求缩略图，
-        // 避免 SwiftUI 复用旧的 @State 导致图片看起来没变。
-        .onChange(of: asset.localIdentifier) { _ in
-            uiImage = nil
-            request()
+            .onDisappear {
+                loadTask?.cancel()
+            }
+            .onChange(of: asset.localIdentifier) { _ in
+                uiImage = nil
+                loadThumbnail()
+            }
+    }
+
+    private func loadThumbnail() {
+        loadTask?.cancel()
+        loadTask = Task {
+            if let image = await PhotoCleanupViewModel.shared?.thumbnail(for: asset.localIdentifier, target: target) {
+                guard !Task.isCancelled else { return }
+                await MainActor.run { self.uiImage = image }
+                return
+            }
+            guard !Task.isCancelled else { return }
+            if let fallback = await fallbackThumbnail() {
+                guard !Task.isCancelled else { return }
+                await MainActor.run { self.uiImage = fallback }
+            }
         }
     }
 
-    private func request() {
-        let options = PHImageRequestOptions()
-        options.isSynchronous = false
-        options.deliveryMode = .opportunistic
-        options.resizeMode = .fast
-        options.isNetworkAccessAllowed = true
+    private func fallbackThumbnail() async -> UIImage? {
+        await withCheckedContinuation { continuation in
+            let options = PHImageRequestOptions()
+            options.isSynchronous = false
+            options.deliveryMode = .opportunistic
+            options.resizeMode = .fast
+            options.isNetworkAccessAllowed = true
+            var resumed = false
 
-        let scale = UIScreen.main.scale
-        let size = CGSize(width: 200 * scale, height: 200 * scale)
-
-        imageManager.requestImage(
-            for: asset,
-            targetSize: size,
-            contentMode: contentMode,
-            options: options
-        ) { image, _ in
-            if let img = image {
-                self.uiImage = img
+            PHCachingImageManager().requestImage(
+                for: asset,
+                targetSize: target.pixelSize,
+                contentMode: target.contentMode,
+                options: options
+            ) { image, _ in
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume(returning: image)
             }
         }
     }

@@ -104,7 +104,7 @@ private struct TrashItemView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
     
     var body: some View {
-        AssetThumbnailView(asset: item.asset, imageManager: viewModel.imageManager)
+        AssetThumbnailView(asset: item.asset, target: .dashboardCard)
             .aspectRatio(1, contentMode: .fill)
             .clipped()
             .overlay(

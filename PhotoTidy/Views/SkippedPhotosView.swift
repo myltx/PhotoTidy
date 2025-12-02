@@ -442,7 +442,7 @@ private struct SkippedPhotoCell: View {
             if let photo = entry.photo {
                 AssetThumbnailView(
                     asset: photo.asset,
-                    imageManager: viewModel.imageManager
+                    target: .dashboardCard
                 )
                 .aspectRatio(1, contentMode: .fill)
                 .clipped()

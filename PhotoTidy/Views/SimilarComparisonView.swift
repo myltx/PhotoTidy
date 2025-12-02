@@ -244,8 +244,7 @@ struct SimilarComparisonView: View {
                     ThumbnailView(
                         item: item,
                         isHero: isHero,
-                        isRecommended: isRecommended,
-                        imageManager: viewModel.imageManager
+                        isRecommended: isRecommended
                     )
                     .onTapGesture {
                         let direction: Edge = idx > heroIndex ? .trailing : .leading
@@ -467,8 +466,7 @@ private struct HeroViewer: View {
             ZStack {
                 AssetThumbnailView(
                     asset: item.asset,
-                    imageManager: viewModel.imageManager,
-                    contentMode: .aspectFit
+                    target: .detailFit
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.black.opacity(0.02))
@@ -609,7 +607,6 @@ private struct ThumbnailView: View {
     let item: PhotoItem
     let isHero: Bool
     let isRecommended: Bool
-    let imageManager: PHCachingImageManager
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -617,8 +614,7 @@ private struct ThumbnailView: View {
 
             AssetThumbnailView(
                 asset: item.asset,
-                imageManager: imageManager,
-                contentMode: .aspectFill
+                target: .dashboardCard
             )
             .frame(width: size.width, height: size.height)
             .clipped()

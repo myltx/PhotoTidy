@@ -12,5 +12,5 @@ enum FeatureToggles {
     /// 是否启用零延迟时光机模块
     static let useZeroLatencyTimeMachine = true
     /// 是否启用苹果级三阶段架构（Metadata/Thumbnail/Full Image）
-    static let enableApplePhotosArchitecture = false
+    static let enableApplePhotosArchitecture =  true
 }

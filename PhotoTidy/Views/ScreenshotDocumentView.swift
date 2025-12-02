@@ -103,8 +103,7 @@ struct ScreenshotDocumentView: View {
             HStack(spacing: 12) {
                 AssetThumbnailView(
                     asset: item.asset,
-                    imageManager: viewModel.imageManager,
-                    contentMode: .aspectFill
+                    target: .dashboardCard
                 )
                 .frame(width: 60, height: 80)
                 .background(Color(UIColor.systemGray5))

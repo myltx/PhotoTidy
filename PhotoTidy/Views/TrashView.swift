@@ -184,8 +184,7 @@ private struct TrashPreviewCell: View {
         ZStack(alignment: .topTrailing) {
         AssetThumbnailView(
             asset: item.asset,
-            imageManager: viewModel.imageManager,
-            contentMode: .aspectFill
+            target: .dashboardCard
         )
             .aspectRatio(1, contentMode: .fill)
             .clipped()

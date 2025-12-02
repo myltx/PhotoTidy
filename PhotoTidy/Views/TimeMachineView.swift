@@ -271,6 +271,19 @@ private struct MonthSquare: View {
                 }
             }
             .clipShape(shape)
+            .overlay(alignment: .topLeading) {
+                if let label = dateRangeLabel {
+                    Text(label)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(dateLabelColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(dateLabelBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .padding(.top, 8)
+                        .padding(.leading, 8)
+                }
+            }
                 .overlay(
                     shape.stroke(palette.baseBorder, lineWidth: 2)
                 )
@@ -312,6 +325,29 @@ private struct MonthSquare: View {
         }
         return palette.unitText
     }
+
+    private var dateLabelColor: Color {
+        thumbnail != nil ? Color.white : Color.secondary
+    }
+
+    private var dateLabelBackground: Color {
+        thumbnail != nil ? Color.black.opacity(0.35) : Color.white.opacity(0.85)
+    }
+
+    private var dateRangeLabel: String? {
+        guard let range = info.dateRange else { return nil }
+        let formatter = Self.dateFormatter
+        let start = formatter.string(from: range.start)
+        let end = formatter.string(from: range.end)
+        if start == end { return start }
+        return "\(start) - \(end)"
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM.dd"
+        return formatter
+    }()
 
     private var palette: Palette {
         switch displayStatus {

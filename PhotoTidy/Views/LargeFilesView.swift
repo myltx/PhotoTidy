@@ -155,8 +155,7 @@ struct LargeFilesView: View {
             ZStack(alignment: .bottomLeading) {
                 AssetThumbnailView(
                     asset: item.asset,
-                    imageManager: viewModel.imageManager,
-                    contentMode: .aspectFill
+                    target: .tinderCard
                 )
                 .frame(maxWidth: .infinity)
                 .aspectRatio(16.0 / 9.0, contentMode: .fit)
@@ -218,8 +217,7 @@ struct LargeFilesView: View {
             HStack(spacing: 12) {
                 AssetThumbnailView(
                     asset: item.asset,
-                    imageManager: viewModel.imageManager,
-                    contentMode: .aspectFill
+                    target: .dashboardCard
                 )
                 .frame(width: 48, height: 48)
                 .background(Color(UIColor.systemGray5))

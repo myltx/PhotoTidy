@@ -77,8 +77,7 @@ struct BlurryReviewView: View {
                         ZStack(alignment: .bottomLeading) {
                             AssetThumbnailView(
                                 asset: item.asset,
-                                imageManager: viewModel.imageManager,
-                                contentMode: .aspectFill
+                                target: .dashboardCard
                             )
                             .aspectRatio(1, contentMode: .fill)
                             .clipped()

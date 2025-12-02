@@ -23,8 +23,7 @@ struct FullScreenPreviewView: View {
                 Spacer()
                 AssetThumbnailView(
                     asset: item.asset,
-                    imageManager: viewModel.imageManager,
-                    contentMode: .aspectFit
+                    target: .detailFit
                 )
                 .scaleEffect(scale)
                 .gesture(

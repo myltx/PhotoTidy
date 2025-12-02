@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 首页 Dashboard，按高保真设计稿实现：
 /// - 顶部标题 + 存储提示
@@ -8,6 +9,7 @@ struct DashboardView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
     var onShowTrash: (() -> Void)? = nil
     @State private var showingResumeResetAlert = false
+    @State private var resumeHeroImage: UIImage?
 
     var body: some View {
         NavigationStack {
@@ -199,12 +201,20 @@ private extension DashboardView {
     
     private func resumeHeroCard(info: PhotoCleanupViewModel.SmartCleanupResumeInfo) -> some View {
         ZStack(alignment: .bottomLeading) {
-            Image("all_album_bg")
-                .resizable()
-                .scaledToFill()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
-                .overlay(Color.black.opacity(0.3))
+            Group {
+                if let resumeHeroImage {
+                    Image(uiImage: resumeHeroImage)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Image("all_album_bg")
+                        .resizable()
+                        .scaledToFill()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+            .overlay(Color.black.opacity(0.35))
 
             LinearGradient(
                 colors: [
@@ -291,6 +301,13 @@ private extension DashboardView {
             guard !viewModel.isLoading else { return }
             viewModel.showCleaner(filter: .all)
         }
+        .task(id: info.anchorPhoto?.id) {
+            if let id = info.anchorPhoto?.id {
+                resumeHeroImage = await viewModel.thumbnail(for: id, target: .tinderCard)
+            } else {
+                resumeHeroImage = nil
+            }
+        }
     }
 
     var smartCleanupTitle: some View {
@@ -310,38 +327,38 @@ private extension DashboardView {
             SmartTile(
                 title: "相似照片",
                 systemIcon: "rectangle.stack",
-                iconColor: .indigo
-            ) {
-                viewModel.showDetail(.similar)
-            }
+                iconColor: .indigo,
+                action: { viewModel.showDetail(.similar) },
+                onAppear: { viewModel.preloadSampleThumbnails(for: .similar, target: .dashboardCard) }
+            )
 
             SmartTile(
                 title: "模糊照片",
                 systemIcon: "drop.triangle",
-                iconColor: .orange
-            ) {
-                viewModel.showDetail(.blurry)
-            }
+                iconColor: .orange,
+                action: { viewModel.showDetail(.blurry) },
+                onAppear: { viewModel.preloadSampleThumbnails(for: .blurred, target: .dashboardCard) }
+            )
 
             SmartTile(
                 title: "截图文档",
                 systemIcon: "doc.richtext",
-                iconColor: .blue
-            ) {
-                viewModel.showDetail(.screenshots)
-            }
+                iconColor: .blue,
+                action: { viewModel.showDetail(.screenshots) },
+                onAppear: { viewModel.preloadSampleThumbnails(for: .screenshots, target: .dashboardCard) }
+            )
 
             SmartTile(
                 title: "大文件",
                 systemIcon: "film",
-                iconColor: .green
-            ) {
-                viewModel.showDetail(.largeFiles)
-            }
+                iconColor: .green,
+                action: { viewModel.showDetail(.largeFiles) },
+                onAppear: { viewModel.preloadSampleThumbnails(for: .large, target: .tinderCard) }
+            )
         }
         .padding(.bottom, 40)
     }
-    
+
     private var storageSummaryCard: some View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 12) {
@@ -552,6 +569,8 @@ private struct SmartTile: View {
     let systemIcon: String
     let iconColor: Color
     let action: () -> Void
+    var onAppear: (() -> Void)? = nil
+    @State private var hasAppeared = false
 
     var body: some View {
         Button(action: action) {
@@ -575,5 +594,10 @@ private struct SmartTile: View {
             )
         }
         .buttonStyle(.plain)
+        .onAppear {
+            guard !hasAppeared else { return }
+            hasAppeared = true
+            onAppear?()
+        }
     }
 }

@@ -33,8 +33,7 @@ struct AlbumGridView: View {
                             ForEach(viewModel.items) { item in
                                 AssetThumbnailView(
                                     asset: item.asset,
-                                    imageManager: viewModel.imageManager,
-                                    contentMode: .aspectFill
+                                    target: .smallGrid
                                 )
                                 .aspectRatio(1, contentMode: .fit)
                             }

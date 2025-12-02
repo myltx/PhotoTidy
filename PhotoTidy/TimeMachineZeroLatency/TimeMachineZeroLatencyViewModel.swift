@@ -17,7 +17,7 @@ final class TimeMachineZeroLatencyViewModel: ObservableObject {
     private let photoRepository = PhotoRepository()
     private let analysisManager: TimeMachineAnalysisManager
     private let analysisCache: PhotoAnalysisCacheStore
-    private let thumbnailStore = ThumbnailStore()
+    private let thumbnailStore: ThumbnailStore
     private var cancellables: Set<AnyCancellable> = []
     private var latestSnapshot: MetadataSnapshot = .empty
     private let placeholderYears = 4
@@ -27,9 +27,11 @@ final class TimeMachineZeroLatencyViewModel: ObservableObject {
 
     init(
         metadataRepository: MetadataRepository? = nil,
-        analysisCache: PhotoAnalysisCacheStore = PhotoAnalysisCacheStore()
+        analysisCache: PhotoAnalysisCacheStore = PhotoAnalysisCacheStore(),
+        thumbnailStore: ThumbnailStore = ThumbnailStore()
     ) {
         self.analysisCache = analysisCache
+        self.thumbnailStore = thumbnailStore
         self.analysisManager = TimeMachineAnalysisManager(analysisCache: analysisCache)
         if let metadataRepository {
             self.metadataRepository = metadataRepository
@@ -219,6 +221,8 @@ extension TimeMachineZeroLatencyViewModel {
 private extension TimeMachineZeroLatencyViewModel {
     func preloadCoverThumbnails(for sections: [TimeMachineMonthSection]) async {
         let months = sections.flatMap { $0.months }
+        let assetIds = months.compactMap { $0.coverAssetId }
+        await thumbnailStore.preload(assetIds: assetIds, target: .timelineCover)
         for info in months {
             guard let assetId = info.coverAssetId else { continue }
             if await isCoverCached(for: info.id) { continue }

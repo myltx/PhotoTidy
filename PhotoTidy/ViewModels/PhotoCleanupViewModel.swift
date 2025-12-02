@@ -48,6 +48,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         didSet {
             captureSmartCleanupAnchor()
             updateLargeImageWindowIfNeeded(center: currentIndex)
+            updateThumbnailWindowIfNeeded(center: currentIndex)
         }
     }
     private var activeMonthContext: (year: Int, month: Int)?
@@ -63,6 +64,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     private let metadataRepository: MetadataRepository
     private let photoRepository = PhotoRepository()
     private let imagePipeline = ImagePipeline()
+    private let thumbnailStore = ThumbnailStore()
     private let largeImagePager = LargeImagePager()
     private let taskPool = TaskPool()
     private let backgroundScheduler = BackgroundJobScheduler()
@@ -294,8 +296,25 @@ private var hasScheduledInitialAssetLoad = false
     func makeZeroLatencyTimeMachineViewModel() -> TimeMachineZeroLatencyViewModel {
         TimeMachineZeroLatencyViewModel(
             metadataRepository: metadataRepository,
-            analysisCache: analysisCache
+            analysisCache: analysisCache,
+            thumbnailStore: thumbnailStore
         )
+    }
+
+    func thumbnail(for assetId: String, target: ThumbnailTarget) async -> UIImage? {
+        await thumbnailStore.thumbnail(for: assetId, target: target)
+    }
+
+    func preloadThumbnails(for assetIds: [String], target: ThumbnailTarget) {
+        guard !assetIds.isEmpty else { return }
+        Task {
+            await thumbnailStore.preload(assetIds: assetIds, target: target)
+        }
+    }
+
+    func preloadSampleThumbnails(for filter: CleanupFilterMode, limit: Int = 12, target: ThumbnailTarget = .dashboardCard) {
+        let ids = sampleAssetIdentifiers(for: filter, limit: limit)
+        preloadThumbnails(for: ids, target: target)
     }
 
     func prepareSession(with assets: [PHAsset], month: MonthInfo) async -> SessionPreparationResult {
@@ -360,6 +379,7 @@ private var hasScheduledInitialAssetLoad = false
             self.currentFilter = .all
             self.currentIndex = 0
         }
+        preloadThumbnails(for: preparedItems.prefix(10).map(\.id), target: .tinderCard)
         if Task.isCancelled { return .cancelled }
         await configureLargeImagePipeline()
         if Task.isCancelled { return .cancelled }
@@ -561,6 +581,7 @@ private var hasScheduledInitialAssetLoad = false
         Task { await taskPool.cancel(scope: .prefetch) }
         cancelSessionPreparation()
         Task { await resetLargeImagePipeline() }
+        Task { await thumbnailStore.resetCache() }
     }
 
     private func cancelSessionPreparation() {
@@ -1280,6 +1301,11 @@ private var hasScheduledInitialAssetLoad = false
             return base.filter { $0.isLargeFile }
         }
     }
+
+    private func sampleAssetIdentifiers(for filter: CleanupFilterMode, limit: Int) -> [String] {
+        let filtered = filteredItems(for: filter, from: items)
+        return filtered.prefix(limit).map(\.id)
+    }
     
     private func currentSkippedSource() -> SkippedPhotoSource {
         if activeMonthContext != nil {
@@ -1463,6 +1489,8 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
                     self.monthPrefetchingKeys.remove(key)
                 }
                 self.imagePipeline.prefetch(assets, targetSize: CGSize(width: 280, height: 280))
+                let ids = assets.map(\.localIdentifier)
+                self.preloadThumbnails(for: ids, target: .tinderCard)
             }
             Task { [weak self] in
                 guard let self else { return }
@@ -1562,6 +1590,15 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
                 self.largeImageCache = cache
             }
         }
+    }
+
+    private func updateThumbnailWindowIfNeeded(center: Int) {
+        guard !sessionItems.isEmpty else { return }
+        let lower = max(0, center - 2)
+        let upper = min(sessionItems.count - 1, center + 4)
+        guard lower <= upper else { return }
+        let ids = (lower...upper).compactMap { sessionItems[safe: $0]?.id }
+        preloadThumbnails(for: ids, target: .tinderCard)
     }
 
     private var largeImageTargetSize: CGSize {

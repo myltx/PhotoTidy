@@ -30,7 +30,6 @@ struct PhotoCardView: View {
             } else {
                 AssetRichPreviewView(
                     asset: item.asset,
-                    imageManager: viewModel.imageManager,
                     contentMode: .aspectFit
                 )
                 .padding(6)
