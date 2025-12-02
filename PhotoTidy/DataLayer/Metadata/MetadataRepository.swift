@@ -74,59 +74,40 @@ final class MetadataRepository: NSObject, ObservableObject, PHPhotoLibraryChange
     private func generateSnapshot() {
         guard let fetchResult else { return }
         let entries = analysisCache.snapshot()
-        var counters = MetadataSnapshot.CategoryCounters.empty
+        let counters = buildCategoryCounters(from: fetchResult, entries: entries)
+        let previous = snapshot
 
-        fetchResult.enumerateObjects { asset, _, _ in
-            if asset.mediaType == .video {
-                counters.video += 1
-            }
-            if asset.mediaSubtypes.contains(.photoLive) {
-                counters.livePhoto += 1
-            }
-            if asset.mediaSubtypes.contains(.photoScreenshot) {
-                counters.screenshot += 1
-            }
-            if self.estimatedSize(for: asset) > MetadataRepository.largeFileThreshold {
-                counters.largeFile += 1
-            }
-
-            if let entry = entries[asset.localIdentifier] {
-                if entry.isBlurredOrShaky {
-                    counters.blurred += 1
-                }
-                if entry.isDocumentLike {
-                    counters.document += 1
-                }
-                if entry.similarityGroupId != nil {
-                    counters.similar += 1
-                }
-            }
-        }
-
-        let momentData = buildMonthMomentData()
-        let monthTotals = momentData.totals
-
-        let snapshot = MetadataSnapshot(
+        let quickSnapshot = MetadataSnapshot(
             schemaVersion: MetadataSnapshot.schemaVersion,
             generatedAt: Date(),
             totalCount: fetchResult.count,
-            monthTotals: monthTotals,
-            monthMomentIdentifiers: momentData.identifiers,
+            monthTotals: previous.monthTotals,
+            monthMomentIdentifiers: previous.monthMomentIdentifiers,
             categoryCounters: counters,
-            deviceStorageUsage: DeviceStorageUsage.current(),
+            deviceStorageUsage: previous.deviceStorageUsage,
             cachedAnalysisVersion: PhotoAnalysisCacheEntry.currentVersion,
-            needsBootstrap: monthTotals.isEmpty && fetchResult.count == 0
+            needsBootstrap: previous.needsBootstrap
         )
 
-        Task {
-            await cacheStore.replace(with: snapshot)
-            await MainActor.run {
-                self.snapshot = snapshot
-                self.needsBootstrap = snapshot.needsBootstrap
-                if !snapshot.needsBootstrap {
-                    self.hasScheduledDeferredRefresh = false
-                }
-            }
+        Task { @MainActor [quickSnapshot] in
+            self.snapshot = quickSnapshot
+        }
+
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            let momentData = self.buildMonthMomentData()
+            let finalSnapshot = MetadataSnapshot(
+                schemaVersion: MetadataSnapshot.schemaVersion,
+                generatedAt: Date(),
+                totalCount: fetchResult.count,
+                monthTotals: momentData.totals,
+                monthMomentIdentifiers: momentData.identifiers,
+                categoryCounters: counters,
+                deviceStorageUsage: DeviceStorageUsage.current(),
+                cachedAnalysisVersion: PhotoAnalysisCacheEntry.currentVersion,
+                needsBootstrap: momentData.totals.isEmpty && fetchResult.count == 0
+            )
+            await self.persist(snapshot: finalSnapshot)
         }
     }
 
@@ -151,7 +132,58 @@ final class MetadataRepository: NSObject, ObservableObject, PHPhotoLibraryChange
 }
 
 private extension MetadataRepository {
+    func persist(snapshot: MetadataSnapshot) async {
+        await cacheStore.replace(with: snapshot)
+        await MainActor.run {
+            self.snapshot = snapshot
+            self.needsBootstrap = snapshot.needsBootstrap
+            if !snapshot.needsBootstrap {
+                self.hasScheduledDeferredRefresh = false
+            }
+        }
+    }
+
     static let largeFileThreshold = 15 * 1_024 * 1_024
+
+    func buildCategoryCounters(from fetchResult: PHFetchResult<PHAsset>, entries: [String: PhotoAnalysisCacheEntry]) -> MetadataSnapshot.CategoryCounters {
+        var counters = MetadataSnapshot.CategoryCounters.empty
+        let total = fetchResult.count
+        let batchSize = 500
+        var index = 0
+        while index < total {
+            autoreleasepool {
+                let upper = min(index + batchSize, total)
+                for idx in index..<upper {
+                    let asset = fetchResult.object(at: idx)
+                    if asset.mediaType == .video {
+                        counters.video += 1
+                    }
+                    if asset.mediaSubtypes.contains(.photoLive) {
+                        counters.livePhoto += 1
+                    }
+                    if asset.mediaSubtypes.contains(.photoScreenshot) {
+                        counters.screenshot += 1
+                    }
+                    if self.estimatedSize(for: asset) > MetadataRepository.largeFileThreshold {
+                        counters.largeFile += 1
+                    }
+                    if let entry = entries[asset.localIdentifier] {
+                        if entry.isBlurredOrShaky {
+                            counters.blurred += 1
+                        }
+                        if entry.isDocumentLike {
+                            counters.document += 1
+                        }
+                        if entry.similarityGroupId != nil {
+                            counters.similar += 1
+                        }
+                    }
+                }
+            }
+            index += batchSize
+        }
+        return counters
+    }
 
     func buildMonthMomentData() -> (totals: [MetadataSnapshot.MonthTotal], identifiers: [String: [String]]) {
         struct MomentAggregate {

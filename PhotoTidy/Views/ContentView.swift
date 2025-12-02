@@ -28,6 +28,12 @@ struct ContentView: View {
                         .transition(.opacity)
                         .zIndex(1)
                 }
+
+                if shouldShowMetadataBootstrapOverlay {
+                    InitialMetadataLoadingView()
+                        .transition(.opacity)
+                        .zIndex(2)
+                }
             }
         }
         .applyColorScheme(viewModel.selectedTheme.preferredColorScheme)
@@ -42,6 +48,11 @@ struct ContentView: View {
         (viewModel.authorizationStatus == .authorized || viewModel.authorizationStatus == .limited) &&
         viewModel.isLoading &&
         viewModel.items.isEmpty
+    }
+
+    private var shouldShowMetadataBootstrapOverlay: Bool {
+        (viewModel.authorizationStatus == .authorized || viewModel.authorizationStatus == .limited) &&
+        viewModel.metadataSnapshot.needsBootstrap
     }
 }
 
@@ -194,3 +205,25 @@ struct PermissionDeniedView: View {
 
 
 // BottomNavBar/ NavButton removed in favor of native TabView
+
+private struct InitialMetadataLoadingView: View {
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.28)
+                .ignoresSafeArea()
+            VStack(spacing: 14) {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .scaleEffect(1.2)
+                Text("正在初始化相册信息…")
+                    .font(.headline)
+                Text("首次扫描仅本地进行，请稍候")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            }
+            .padding(32)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .shadow(color: Color.black.opacity(0.15), radius: 25, y: 12)
+        }
+    }
+}
