@@ -11,7 +11,7 @@ struct PhotoCardView: View {
         ZStack(alignment: .topLeading) {
             Color(UIColor.secondarySystemBackground)
 
-            if viewModel.isZeroLatencyTimeMachineSession {
+            ZStack {
                 if let image = viewModel.cachedLargeImage(for: item.id) {
                     Image(uiImage: image)
                         .resizable()
@@ -20,32 +20,14 @@ struct PhotoCardView: View {
                         .background(Color.black.opacity(0.9))
                         .padding(6)
                 } else {
-                    ZStack {
-                        Color.black.opacity(0.15)
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                    }
+                    AssetRichPreviewView(
+                        asset: item.asset,
+                        contentMode: .aspectFit,
+                        onRequestFullImage: { id in
+                            viewModel.requestFullImage(for: id)
+                        }
+                    )
                     .padding(6)
-                }
-            } else {
-                ZStack {
-                    if let image = viewModel.cachedLargeImage(for: item.id) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(Color.black.opacity(0.9))
-                            .padding(6)
-                    } else {
-                        AssetRichPreviewView(
-                            asset: item.asset,
-                            contentMode: .aspectFit,
-                            onRequestFullImage: { id in
-                                viewModel.requestFullImage(for: id)
-                            }
-                        )
-                        .padding(6)
-                    }
                 }
             }
 

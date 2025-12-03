@@ -67,6 +67,13 @@ struct MonthInfo: Identifiable, Equatable {
     }
 }
 
+struct TimeMachineMonthSection: Identifiable, Equatable {
+    let year: Int
+    let months: [MonthInfo]
+
+    var id: Int { year }
+}
+
 @discardableResult
 func analyzeMonthCleaningStatus(
     totalPhotos: Int,

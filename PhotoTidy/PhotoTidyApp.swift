@@ -7,11 +7,7 @@ import SwiftUI
 struct PhotoTidyApp: App {
     var body: some Scene {
         WindowGroup {
-            if FeatureToggles.useZeroLatencyArchitectureDemo {
-                ZeroLatencyRootView()
-            } else {
-                ContentView()
-            }
+            ContentView()
         }
     }
 }
