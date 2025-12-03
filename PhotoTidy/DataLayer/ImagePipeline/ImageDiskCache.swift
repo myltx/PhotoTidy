@@ -29,7 +29,7 @@ final class ImageDiskCache {
     func store(_ image: UIImage, forKey key: String) {
         ioQueue.async { [weak self] in
             guard let self else { return }
-            guard let data = image.jpegData(compressionQuality: 0.85) else { return }
+            guard let data = self.data(for: image) else { return }
             let url = self.directoryURL.appendingPathComponent(key)
             do {
                 try data.write(to: url, options: .atomic)
@@ -69,6 +69,25 @@ final class ImageDiskCache {
             guard remaining > byteLimit else { break }
             try? fileManager.removeItem(at: entry.url)
             remaining = remaining > entry.size ? remaining - entry.size : 0
+        }
+    }
+
+    private func data(for image: UIImage) -> Data? {
+        guard let cgImage = image.cgImage else {
+            return image.pngData()
+        }
+        let alphaInfo = cgImage.alphaInfo
+        let hasAlpha: Bool
+        switch alphaInfo {
+        case .none, .noneSkipFirst, .noneSkipLast:
+            hasAlpha = false
+        default:
+            hasAlpha = true
+        }
+        if hasAlpha {
+            return image.pngData()
+        } else {
+            return image.jpegData(compressionQuality: 0.85)
         }
     }
 }

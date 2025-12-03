@@ -20,13 +20,19 @@ final class ImageCache {
 
     func requestThumbnail(for asset: PHAsset, targetSize: CGSize? = nil) async -> UIImage? {
         await withCheckedContinuation { continuation in
-            cachingManager.requestImage(
-                for: asset,
-                targetSize: (targetSize ?? defaultTargetSize) * UIScreen.main.scale,
-                contentMode: .aspectFill,
-                options: requestOptions
-            ) { image, _ in
-                continuation.resume(returning: image)
+            PhotoKitThread.perform { [weak self] in
+                guard let self else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                self.cachingManager.requestImage(
+                    for: asset,
+                    targetSize: (targetSize ?? self.defaultTargetSize) * UIScreen.main.scale,
+                    contentMode: .aspectFill,
+                    options: self.requestOptions
+                ) { image, _ in
+                    continuation.resume(returning: image)
+                }
             }
         }
     }

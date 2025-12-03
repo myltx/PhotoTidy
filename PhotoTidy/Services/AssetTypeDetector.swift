@@ -128,16 +128,18 @@ final class AssetTypeDetector {
         options.isNetworkAccessAllowed = false
         options.version = .current
 
-        PHImageManager.default().requestImageDataAndOrientation(
-            for: asset,
-            options: options
-        ) { data, _, _, _ in
-            defer { semaphore.signal() }
-            guard let data = data,
-                  let source = CGImageSourceCreateWithData(data as CFData, nil),
-                  let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
-            else { return }
-            properties = props
+        PhotoKitThread.perform {
+            PHImageManager.default().requestImageDataAndOrientation(
+                for: asset,
+                options: options
+            ) { data, _, _, _ in
+                defer { semaphore.signal() }
+                guard let data = data,
+                      let source = CGImageSourceCreateWithData(data as CFData, nil),
+                      let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+                else { return }
+                properties = props
+            }
         }
 
         semaphore.wait()

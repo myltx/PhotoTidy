@@ -28,11 +28,17 @@ struct AnimatedImageView: View {
             options.deliveryMode = .highQualityFormat
             options.isNetworkAccessAllowed = true
             options.version = .original
-            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, _ in
-                if let data {
-                    continuation.resume(returning: UIImage.animatedImage(withGIFData: data))
-                } else {
-                    continuation.resume(returning: nil)
+            var resumed = false
+
+            PhotoKitThread.perform {
+                PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, _ in
+                    guard !resumed else { return }
+                    resumed = true
+                    if let data {
+                        continuation.resume(returning: UIImage.animatedImage(withGIFData: data))
+                    } else {
+                        continuation.resume(returning: nil)
+                    }
                 }
             }
         }

@@ -23,11 +23,15 @@ final class PhotoSessionManager {
         self.thumbnailStore = thumbnailStore
     }
 
-    func session(scope: PhotoSessionScope, batchSize: Int = 60) -> PhotoSession {
+    func session(scope: PhotoSessionScope) -> PhotoSession {
         if let existing = sessions.values.first(where: { $0.scope == scope }) {
             return existing
         }
-        let session = PhotoSession(scope: scope, batchSize: batchSize)
+        let session = PhotoSession(
+            scope: scope,
+            batchSize: batchSize(for: scope),
+            windowLimit: windowLimit(for: scope)
+        )
         session.delegate = self
         sessions[session.id] = session
         return session
@@ -65,6 +69,25 @@ final class PhotoSessionManager {
 
     func resetSessions() {
         sessions.removeAll()
+    }
+
+    private func windowLimit(for scope: PhotoSessionScope) -> Int? {
+        guard FeatureToggles.enableApplePhotosArchitecture else { return nil }
+        switch scope {
+        case .all, .filter:
+            return 60
+        case .month, .album:
+            return 120
+        }
+    }
+
+    private func batchSize(for scope: PhotoSessionScope) -> Int {
+        switch scope {
+        case .all, .filter:
+            return 10
+        case .month, .album:
+            return 18
+        }
     }
 
     private func loadDescriptors(scope: PhotoSessionScope, offset: Int, limit: Int) async -> [AssetDescriptor] {

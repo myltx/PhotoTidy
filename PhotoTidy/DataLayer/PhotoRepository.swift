@@ -203,30 +203,28 @@ actor PhotoRepository {
     func assetIdentifiersFromMoments(year: Int, month: Int) async -> [String] {
         await bootstrapLibraryIfNeeded()
         let calendar = Calendar.current
-        let moments = PHAssetCollection.fetchAssetCollections(with: .moment, subtype: .any, options: nil)
+        var components = DateComponents()
+        components.year = year
+        components.month = month
+        components.day = 1
+        guard let startDate = calendar.date(from: components),
+              let endDate = calendar.date(byAdding: .month, value: 1, to: startDate) else { return [] }
+        let predicate = NSPredicate(format: "(creationDate >= %@) AND (creationDate < %@)", startDate as NSDate, endDate as NSDate)
+        let options = PHFetchOptions()
+        options.predicate = predicate
+        options.includeHiddenAssets = false
+        options.includeAllBurstAssets = false
+        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        let fetchResult = PHAsset.fetchAssets(with: options)
         var identifiers: [String] = []
         var cancelled = false
-        moments.enumerateObjects { collection, _, stopCollections in
+        fetchResult.enumerateObjects { asset, _, stop in
             if Task.isCancelled {
                 cancelled = true
-                stopCollections.pointee = true
+                stop.pointee = true
                 return
             }
-            guard let start = collection.startDate ?? collection.endDate else { return }
-            let comps = calendar.dateComponents([.year, .month], from: start)
-            guard comps.year == year, comps.month == month else { return }
-            let assets = PHAsset.fetchAssets(in: collection, options: nil)
-            assets.enumerateObjects { asset, _, stopAssets in
-                if Task.isCancelled {
-                    cancelled = true
-                    stopAssets.pointee = true
-                    return
-                }
-                identifiers.append(asset.localIdentifier)
-            }
-            if cancelled {
-                stopCollections.pointee = true
-            }
+            identifiers.append(asset.localIdentifier)
         }
         return cancelled ? [] : identifiers
     }

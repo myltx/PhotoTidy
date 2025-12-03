@@ -123,18 +123,20 @@ actor AnalysisManager {
             options.resizeMode = .fast
             options.isSynchronous = false
             options.isNetworkAccessAllowed = true
-            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, info in
-                if let error = info?[PHImageErrorKey] as? Error {
-                    continuation.resume(throwing: error)
-                    return
+            PhotoKitThread.perform {
+                PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, info in
+                    if let error = info?[PHImageErrorKey] as? Error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+                    guard let data else {
+                        continuation.resume(throwing: AnalysisError.imageDataMissing)
+                        return
+                    }
+                    let resources = PHAssetResource.assetResources(for: asset)
+                    let size = resources.first.flatMap { $0.value(forKey: "fileSize") as? Int } ?? data.count
+                    continuation.resume(returning: ImageResponse(data: data, fileSize: size))
                 }
-                guard let data else {
-                    continuation.resume(throwing: AnalysisError.imageDataMissing)
-                    return
-                }
-                let resources = PHAssetResource.assetResources(for: asset)
-                let size = resources.first.flatMap { $0.value(forKey: "fileSize") as? Int } ?? data.count
-                continuation.resume(returning: ImageResponse(data: data, fileSize: size))
             }
         }
     }

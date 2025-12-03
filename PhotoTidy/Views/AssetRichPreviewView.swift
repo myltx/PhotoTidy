@@ -233,12 +233,18 @@ struct AssetRichPreviewView: View {
             let options = PHVideoRequestOptions()
             options.deliveryMode = .mediumQualityFormat
             options.isNetworkAccessAllowed = true
-            PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, _, _ in
-                if let avAsset {
-                    let item = AVPlayerItem(asset: avAsset)
-                    continuation.resume(returning: AVPlayer(playerItem: item))
-                } else {
-                    continuation.resume(returning: nil)
+            var resumed = false
+
+            PhotoKitThread.perform {
+                PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, _, _ in
+                    guard !resumed else { return }
+                    resumed = true
+                    if let avAsset {
+                        let item = AVPlayerItem(asset: avAsset)
+                        continuation.resume(returning: AVPlayer(playerItem: item))
+                    } else {
+                        continuation.resume(returning: nil)
+                    }
                 }
             }
         }
@@ -250,11 +256,17 @@ struct AssetRichPreviewView: View {
             options.deliveryMode = .highQualityFormat
             options.isNetworkAccessAllowed = true
             options.version = .original
-            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, _ in
-                if let data, let result = UIImage.animatedImageWithDuration(data: data) {
-                    continuation.resume(returning: result)
-                } else {
-                    continuation.resume(returning: nil)
+            var resumed = false
+
+            PhotoKitThread.perform {
+                PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, _ in
+                    guard !resumed else { return }
+                    resumed = true
+                    if let data, let result = UIImage.animatedImageWithDuration(data: data) {
+                        continuation.resume(returning: result)
+                    } else {
+                        continuation.resume(returning: nil)
+                    }
                 }
             }
         }
@@ -317,17 +329,21 @@ private struct LivePhotoPlayerView: UIViewRepresentable {
             let options = PHLivePhotoRequestOptions()
             options.deliveryMode = .highQualityFormat
             options.isNetworkAccessAllowed = true
-            PHImageManager.default().requestLivePhoto(
-                for: asset,
-                targetSize: CGSize(width: 1200, height: 1200),
-                contentMode: .aspectFit,
-                options: options
-            ) { livePhoto, _ in
-                uiView.livePhoto = livePhoto
-                if let livePhoto {
-                    uiView.startPlayback(with: .hint)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        uiView.startPlayback(with: .full)
+            PhotoKitThread.perform {
+                PHImageManager.default().requestLivePhoto(
+                    for: asset,
+                    targetSize: CGSize(width: 1200, height: 1200),
+                    contentMode: .aspectFit,
+                    options: options
+                ) { livePhoto, _ in
+                    DispatchQueue.main.async {
+                        uiView.livePhoto = livePhoto
+                        if let livePhoto {
+                            uiView.startPlayback(with: .hint)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                uiView.startPlayback(with: .full)
+                            }
+                        }
                     }
                 }
             }

@@ -79,16 +79,20 @@ struct AssetThumbnailView: View {
             options.isNetworkAccessAllowed = true
             var resumed = false
 
-            PHCachingImageManager().requestImage(
-                for: asset,
-                targetSize: target.pixelSize,
-                contentMode: target.contentMode,
-                options: options
-            ) { image, _ in
-                guard !resumed else { return }
-                resumed = true
-                continuation.resume(returning: image)
+            PhotoKitThread.perform {
+                fallbackImageManager.requestImage(
+                    for: asset,
+                    targetSize: target.pixelSize,
+                    contentMode: target.contentMode,
+                    options: options
+                ) { image, _ in
+                    guard !resumed else { return }
+                    resumed = true
+                    continuation.resume(returning: image)
+                }
             }
         }
     }
 }
+
+private let fallbackImageManager = PHCachingImageManager()

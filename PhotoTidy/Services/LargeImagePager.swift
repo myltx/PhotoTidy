@@ -7,7 +7,7 @@ actor LargeImagePager {
     private var targetSize: CGSize = .zero
     private var cache: [String: UIImage] = [:]
     private var order: [String] = []
-    private let maxCacheCount = 4
+    private let maxCacheCount = 3
     private let imageManager = PHCachingImageManager()
 
     func configure(assets: [PHAsset], targetSize: CGSize) {
