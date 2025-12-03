@@ -63,33 +63,20 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     private let analysisCache: PhotoAnalysisCacheStore
     private let metadataRepository: MetadataRepository
     private let photoRepository = PhotoRepository()
-    private let imagePipeline = ImagePipeline()
     private let thumbnailStore = ThumbnailStore()
     private let largeImagePager = LargeImagePager()
     private let fullImageStore = FullImageStore()
     private let sessionManager: PhotoSessionManager
-    private let taskPool = TaskPool()
     private let backgroundScheduler = BackgroundJobScheduler()
     private var assetsFetchResult: PHFetchResult<PHAsset>?
     private var cancellables: Set<AnyCancellable> = []
-private let zeroLatencyImageCache = ImageCache()
-    private lazy var pagingLoader: PhotoLoader = {
-        let loader = PhotoLoader(imageCache: zeroLatencyImageCache)
-        loader.delegate = self
-        return loader
-    }()
-    private var loadedAssetIdentifiers: Set<String> = []
-    private var hasStartedPagingLoader = false
     private var hasTriggeredBackgroundAnalysis = false
-    private var hasInitializedSession = false
-    private var sessionItemIds: Set<String> = []
     private var selectedAlbumAssetIds: Set<String>?
     private var hasLoadedAlbumFilters = false
-    private var monthPrefetchingKeys: Set<String> = []
-private var hasScheduledInitialAssetLoad = false
     private var sessionPreparationTask: Task<SessionPreparationResult, Never>?
     private var sessionPreparationToken: UUID?
     private var activeSession: PhotoSession?
+    private var allSession: PhotoSession?
     private var hasPrewarmedAllSession = false
 
     // MARK: - Computed Properties
@@ -187,9 +174,8 @@ private var hasScheduledInitialAssetLoad = false
         PHPhotoLibrary.shared().register(self)
         if authorizationStatus.isAuthorized {
             ensureMetadataBootstrap()
-            if !FeatureToggles.enableZeroLatencyPipeline || !FeatureToggles.lazyLoadPhotoSessions {
-                scheduleInitialAssetLoad()
-            }
+            loadAlbumFiltersIfNeeded()
+            refreshAssetsFetchResult()
             prewarmAllSessionIfNeeded()
         }
         
@@ -206,12 +192,8 @@ private var hasScheduledInitialAssetLoad = false
             PhotoCleanupViewModel.shared = nil
         }
         PHPhotoLibrary.shared().unregisterChangeObserver(self)
-        let pool = taskPool
         let scheduler = backgroundScheduler
         let pager = largeImagePager
-        Task.detached {
-            await pool.cancelAll()
-        }
         Task.detached {
             await scheduler.cancelAll()
         }
@@ -241,11 +223,15 @@ private var hasScheduledInitialAssetLoad = false
         metadataRepository.bootstrapIfNeeded()
     }
 
-    private func ensureRealAssetPipeline() {
-        guard FeatureToggles.enableZeroLatencyPipeline, FeatureToggles.lazyLoadPhotoSessions else { return }
-        scheduleInitialAssetLoad()
+    private func refreshAssetsFetchResult() {
+        guard authorizationStatus == .authorized || authorizationStatus == .limited else { return }
+        let options = PHFetchOptions()
+        options.includeHiddenAssets = false
+        options.includeAllBurstAssets = false
+        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        assetsFetchResult = PHAsset.fetchAssets(with: options)
     }
-    
+
     // MARK: - Status Updates
     
     private func updateAuthorizationStatus() {
@@ -256,10 +242,9 @@ private var hasScheduledInitialAssetLoad = false
 
             if newStatus != oldStatus && newStatus.isAuthorized {
                 self.ensureMetadataBootstrap()
+                self.loadAlbumFiltersIfNeeded()
+                self.refreshAssetsFetchResult()
                 self.prewarmAllSessionIfNeeded()
-                if !FeatureToggles.enableZeroLatencyPipeline || !FeatureToggles.lazyLoadPhotoSessions {
-                    self.scheduleInitialAssetLoad()
-                }
             }
         }
     }
@@ -268,31 +253,34 @@ private var hasScheduledInitialAssetLoad = false
     
     func photoLibraryDidChange(_ changeInstance: PHChange) {
         guard let fetchResult = assetsFetchResult,
-              changeInstance.changeDetails(for: fetchResult) != nil else { return }
+              let details = changeInstance.changeDetails(for: fetchResult) else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.resetPagingState()
-            self.pagingLoader.reloadLibrary()
-            self.photoRepository.reloadLibrary()
-            if FeatureToggles.enableZeroLatencyPipeline {
-                self.metadataRepository.refresh()
+            self.assetsFetchResult = details.fetchResultAfterChanges
+            if let updatedResult = self.assetsFetchResult {
+                DispatchQueue.global(qos: .utility).async { [weak self] in
+                    var identifiers: Set<String> = []
+                    updatedResult.enumerateObjects { asset, _, _ in
+                        identifiers.insert(asset.localIdentifier)
+                    }
+                    self?.analysisCache.pruneMissingEntries(keeping: identifiers)
+                }
             }
+            self.resetSessionState()
+            self.photoRepository.reloadLibrary()
+            self.sessionManager.resetSessions()
+            self.prewarmAllSessionIfNeeded()
+            self.metadataRepository.refresh()
         }
     }
     
     // MARK: - Navigation
     
     func showCleaner(filter: CleanupFilterMode) {
-        ensureRealAssetPipeline()
+        prewarmAllSessionIfNeeded()
         activeMonthContext = nil
-        if FeatureToggles.enableApplePhotosArchitecture {
-            activateFilterSession(filter: filter)
-            isShowingCleaner = true
-            return
-        }
-        activeSession = nil
+        activateFilterSession(filter: filter)
         isShowingCleaner = true
-        updateSessionItems(for: filter)
     }
 
     func resumeSmartCleanup() {
@@ -305,7 +293,7 @@ private var hasScheduledInitialAssetLoad = false
     }
 
     func showCleaner(forMonth year: Int, month: Int) {
-        ensureRealAssetPipeline()
+        prewarmAllSessionIfNeeded()
         activeMonthContext = (year, month)
         rebuildMonthSession(year: year, month: month)
         isShowingCleaner = true
@@ -370,7 +358,6 @@ private var hasScheduledInitialAssetLoad = false
     }
 
     func showDetail(_ detail: DashboardDetail) {
-        ensureRealAssetPipeline()
         activeDetail = detail
     }
 
@@ -382,7 +369,6 @@ private var hasScheduledInitialAssetLoad = false
         await MainActor.run {
             self.activeMonthContext = (month.year, month.month)
             self.sessionItems = []
-            self.sessionItemIds.removeAll()
             self.currentFilter = .all
             self.currentIndex = 0
             self.isShowingCleaner = true
@@ -400,11 +386,10 @@ private var hasScheduledInitialAssetLoad = false
         }
         await MainActor.run {
             self.integratePreparedItems(preparedItems)
-            self.hasInitializedSession = true
             self.sessionItems = preparedItems
-            self.sessionItemIds = Set(preparedItems.map(\.id))
             self.currentFilter = .all
             self.currentIndex = 0
+            self.scheduleBackgroundAnalysisIfNeeded()
         }
         preloadThumbnails(for: preparedItems.prefix(10).map(\.id), target: .tinderCard)
         if Task.isCancelled { return .cancelled }
@@ -417,31 +402,20 @@ private var hasScheduledInitialAssetLoad = false
     // MARK: - Session Management
 
     func updateSessionItems(for filter: CleanupFilterMode) {
-        guard !FeatureToggles.enableApplePhotosArchitecture else {
-            currentFilter = filter
-            return
-        }
-        self.currentFilter = filter
-        let filtered = filteredItems(for: filter, from: items)
-        sessionItems = filtered
-        sessionItemIds = Set(filtered.map(\.id))
-        currentIndex = 0
+        currentFilter = filter
+        refreshSession()
     }
 
     func refreshSession() {
-        if FeatureToggles.enableApplePhotosArchitecture, let session = activeSession {
-            sessionItems = session.state.items
-            sessionItemIds = Set(session.state.items.map(\.id))
-            currentIndex = min(currentIndex, max(sessionItems.count - 1, 0))
-            return
-        }
-        if let context = activeMonthContext {
-            rebuildMonthSession(year: context.year, month: context.month)
-        } else {
-            let filtered = filteredItems(for: currentFilter, from: items)
+        if let session = activeSession {
+            applyRestoredSessionItems(from: session)
+        } else if let session = allSession {
+            let filtered = applyAlbumFilter(to: session.state.items)
             sessionItems = filtered
-            sessionItemIds = Set(filtered.map(\.id))
             currentIndex = min(currentIndex, max(sessionItems.count - 1, 0))
+        } else {
+            sessionItems = []
+            currentIndex = 0
         }
     }
 
@@ -450,9 +424,7 @@ private var hasScheduledInitialAssetLoad = false
         selectedAlbumFilter = filter
         if let collection = filter.collection {
             selectedAlbumAssetIds = nil
-            hasInitializedSession = false
             sessionItems = []
-            sessionItemIds.removeAll()
             currentIndex = 0
             Task.detached { [weak self] in
                 guard let self else { return }
@@ -468,15 +440,6 @@ private var hasScheduledInitialAssetLoad = false
         }
     }
 
-    private func resetSessionForAlbumChange() {
-        hasInitializedSession = false
-        sessionItems = []
-        sessionItemIds.removeAll()
-        currentIndex = 0
-        updateSessionItems(for: currentFilter)
-        objectWillChange.send()
-    }
-
     // MARK: - Data Loading & Analysis
 
     func requestAuthorization() {
@@ -486,72 +449,22 @@ private var hasScheduledInitialAssetLoad = false
                 self.authorizationStatus = newStatus
                 if newStatus.isAuthorized {
                     self.ensureMetadataBootstrap()
-                    if !FeatureToggles.enableZeroLatencyPipeline || !FeatureToggles.lazyLoadPhotoSessions {
-                        self.scheduleInitialAssetLoad()
-                    }
+                    self.loadAlbumFiltersIfNeeded()
+                    self.refreshAssetsFetchResult()
+                    self.prewarmAllSessionIfNeeded()
                 }
             }
-        }
-    }
-
-    func loadAssets() {
-        guard authorizationStatus == .authorized || authorizationStatus == .limited else { return }
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            self?.performInitialAssetLoad()
-        }
-    }
-
-    private func scheduleInitialAssetLoad() {
-        guard !hasScheduledInitialAssetLoad else { return }
-        hasScheduledInitialAssetLoad = true
-        Task { await self.photoRepository.bootstrapLibraryIfNeeded() }
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            self?.performInitialAssetLoad()
-        }
-    }
-
-    private func performInitialAssetLoad() {
-        loadAlbumFiltersIfNeeded()
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            guard authorizationStatus == .authorized || authorizationStatus == .limited else { return }
-            self.isLoading = true
-            self.startPagingLoader()
         }
     }
 
     func ensureAssetsPrepared() {
         if FeatureToggles.enableZeroLatencyPipeline {
             ensureMetadataBootstrap()
-            if !FeatureToggles.lazyLoadPhotoSessions {
-                scheduleInitialAssetLoad()
-            }
+            loadAlbumFiltersIfNeeded()
+            refreshAssetsFetchResult()
+            prewarmAllSessionIfNeeded()
         } else {
-            scheduleInitialAssetLoad()
             refreshDeviceStorageUsage()
-        }
-    }
-
-    private func assets(in fetchResult: PHFetchResult<PHAsset>, year: Int, month: Int) -> [PHAsset] {
-        var matched: [PHAsset] = []
-        let calendar = Calendar.current
-        fetchResult.enumerateObjects { asset, _, _ in
-            guard let date = asset.creationDate ?? asset.modificationDate else { return }
-            let comps = calendar.dateComponents([.year, .month], from: date)
-            if comps.year == year && comps.month == month {
-                matched.append(asset)
-            }
-        }
-        return matched
-    }
-
-    private func startPagingLoader() {
-        if hasStartedPagingLoader {
-            resetPagingState()
-            pagingLoader.reloadLibrary()
-        } else {
-            hasStartedPagingLoader = true
-            pagingLoader.start()
         }
     }
 
@@ -605,28 +518,32 @@ private var hasScheduledInitialAssetLoad = false
         }
     }
 
-    private func resetPagingState() {
-        loadedAssetIdentifiers.removeAll()
+    private func resetSessionState() {
         hasTriggeredBackgroundAnalysis = false
-        hasInitializedSession = false
-        sessionItemIds.removeAll()
         items = []
         sessionItems = []
         currentIndex = 0
         currentFilter = .all
-        Task { await taskPool.cancel(scope: .prefetch) }
-        Task { await taskPool.cancel(scope: .prefetch) }
+        activeSession = nil
+        allSession = nil
+        hasPrewarmedAllSession = false
         cancelSessionPreparation()
         Task { await resetLargeImagePipeline() }
         Task { await thumbnailStore.resetCache() }
     }
 
     private func prewarmAllSessionIfNeeded() {
-        guard FeatureToggles.enableApplePhotosArchitecture, !hasPrewarmedAllSession else { return }
+        guard FeatureToggles.enableApplePhotosArchitecture else { return }
+        guard !hasPrewarmedAllSession else { return }
         hasPrewarmedAllSession = true
         let session = sessionManager.session(scope: .all)
-        Task {
-            await sessionManager.loadNextBatch(for: session)
+        allSession = session
+        if session.state.items.isEmpty {
+            Task { await sessionManager.loadNextBatch(for: session) }
+        } else {
+            Task { @MainActor in
+                self.applyAllSessionItems(session)
+            }
         }
     }
 
@@ -634,63 +551,6 @@ private var hasScheduledInitialAssetLoad = false
         sessionPreparationTask?.cancel()
         sessionPreparationTask = nil
         sessionPreparationToken = nil
-    }
-
-    private func ingestAssets(_ assets: [PHAsset]) {
-        guard !assets.isEmpty else { return }
-        let cacheEntries = analysisCache.snapshot()
-        var incoming: [PhotoItem] = []
-
-        for asset in assets {
-            let id = asset.localIdentifier
-            if loadedAssetIdentifiers.contains(id) { continue }
-            loadedAssetIdentifiers.insert(id)
-            let estimatedSize = assetResourceSize(for: asset)
-            var item = photoItem(for: asset, estimatedSize: estimatedSize)
-            if let entry = cacheEntries[id],
-               entry.version == PhotoAnalysisCacheEntry.currentVersion,
-               entry.fileSize == item.fileSize {
-                Self.applyCachedEntry(entry, to: &item)
-            }
-            incoming.append(item)
-        }
-
-        guard !incoming.isEmpty else { return }
-        restoreSelectionStates(in: &incoming)
-        items.append(contentsOf: incoming)
-        if isLoading {
-            isLoading = false
-        }
-        if !hasInitializedSession {
-            hasInitializedSession = true
-            updateSessionItems(for: currentFilter)
-        } else if !isShowingCleaner {
-            refreshSession()
-        } else if activeMonthContext == nil {
-            appendIncomingToSession(newItems: incoming)
-        } else if let context = activeMonthContext,
-                  incomingContainsItems(forYear: context.year, month: context.month, items: incoming) {
-            rebuildMonthSession(year: context.year, month: context.month)
-        }
-        scheduleBackgroundAnalysisIfNeeded()
-    }
-
-    private func incomingContainsItems(forYear year: Int, month: Int, items: [PhotoItem]) -> Bool {
-        let calendar = Calendar.current
-        return items.contains { item in
-            guard let date = item.creationDate else { return false }
-            let comps = calendar.dateComponents([.year, .month], from: date)
-            return comps.year == year && comps.month == month
-        }
-    }
-
-    private func appendIncomingToSession(newItems: [PhotoItem]) {
-        guard !newItems.isEmpty else { return }
-        let filtered = filteredItems(for: currentFilter, from: newItems)
-            .filter { !sessionItemIds.contains($0.id) }
-        guard !filtered.isEmpty else { return }
-        sessionItems.append(contentsOf: filtered)
-        filtered.forEach { sessionItemIds.insert($0.id) }
     }
 
     static func applyCachedEntry(_ entry: PhotoAnalysisCacheEntry, to item: inout PhotoItem) {
@@ -880,7 +740,6 @@ private var hasScheduledInitialAssetLoad = false
             return
         }
         let removedIndex = currentIndex
-        sessionItemIds.remove(sessionItems[removedIndex].id)
         sessionItems.remove(at: removedIndex)
         if sessionItems.isEmpty {
             currentIndex = 0
@@ -1065,18 +924,7 @@ private var hasScheduledInitialAssetLoad = false
     // MARK: - Month Status Tracking
 
     private func rebuildMonthSession(year: Int, month: Int) {
-        if FeatureToggles.enableApplePhotosArchitecture {
-            activateMonthSession(year: year, month: month)
-        } else {
-            rebuildMonthSessionLegacy(year: year, month: month)
-        }
-    }
-
-    private func rebuildMonthSessionLegacy(year: Int, month: Int) {
-        sessionItems = monthItems(year: year, month: month)
-        currentFilter = .all
-        currentIndex = 0
-        sessionItemIds = Set(sessionItems.map(\.id))
+        activateMonthSession(year: year, month: month)
     }
 
     private func activateMonthSession(year: Int, month: Int) {
@@ -1093,31 +941,52 @@ private var hasScheduledInitialAssetLoad = false
         currentFilter = filter
         let session = sessionManager.session(scope: scope)
         activeSession = session
-        sessionItems = []
-        sessionItemIds.removeAll()
-        items = []
-        currentIndex = 0
         if session.state.items.isEmpty {
+            sessionItems = []
+            currentIndex = 0
             Task {
                 await sessionManager.loadNextBatch(for: session)
             }
         } else {
-            var restored = session.state.items
-            restoreSelectionStates(in: &restored)
-            sessionItems = restored
-            sessionItemIds = Set(restored.map(\.id))
-            items = restored
-            Task { await configureLargeImagePipeline() }
+            applyRestoredSessionItems(from: session)
         }
     }
 
+    private func applyRestoredSessionItems(from session: PhotoSession) {
+        var restored = session.state.items
+        restoreSelectionStates(in: &restored)
+        integratePreparedItems(restored)
+        let filtered = applyAlbumFilter(to: restored)
+        sessionItems = filtered
+        currentIndex = min(currentIndex, max(filtered.count - 1, 0))
+        Task { await configureLargeImagePipeline() }
+    }
+
+    @MainActor
+    private func applyAllSessionItems(_ session: PhotoSession) {
+        var restored = session.state.items
+        restoreSelectionStates(in: &restored)
+        items = restored
+        if !isShowingCleaner {
+            sessionItems = applyAlbumFilter(to: restored)
+        }
+        scheduleBackgroundAnalysisIfNeeded()
+    }
+
     private func restoreSelectionStates(in items: inout [PhotoItem]) {
+        let pendingIds = Set(self.pendingDeletionItems.map { $0.id })
+        let skippedIds = Set(timeMachineSkippedPhotoIds)
         for index in items.indices {
-            guard
+            let id = items[index].id
+            if pendingIds.contains(id) || skippedIds.contains(id) {
+                items[index].markedForDeletion = true
+                continue
+            }
+            if
                 let comps = monthComponents(for: items[index]),
-                let progress = timeMachineProgressStore.progress(year: comps.year, month: comps.month)
-            else { continue }
-            if progress.selectedPhotoIds.contains(items[index].id) {
+                let progress = timeMachineProgressStore.progress(year: comps.year, month: comps.month),
+                progress.selectedPhotoIds.contains(id)
+            {
                 items[index].markedForDeletion = true
             }
         }
@@ -1312,32 +1181,6 @@ private var hasScheduledInitialAssetLoad = false
         return (year, month)
     }
     
-    private func monthItems(year: Int, month: Int) -> [PhotoItem] {
-        let calendar = Calendar.current
-        let key = "\(year)-\(month)"
-        let filtered = items.filter { item in
-            guard !item.markedForDeletion, let date = item.creationDate else { return false }
-            let comps = calendar.dateComponents([.year, .month], from: date)
-            guard comps.year == year && comps.month == month else { return false }
-            return !isPhotoDeferredInTimeMachine(item)
-        }
-        let sorted = filtered.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
-        #if DEBUG
-        let totalInMonth = items.filter { item in
-            guard let date = item.creationDate else { return false }
-            let comps = calendar.dateComponents([.year, .month], from: date)
-            return comps.year == year && comps.month == month
-        }.count
-        let deferredCount = totalInMonth - sorted.count
-        print("[TimeMachineMonthItems] \(year)-\(month): total=\(totalInMonth) visible=\(sorted.count) deferred=\(deferredCount)")
-        #endif
-        if sorted.isEmpty,
-           let total = monthAssetTotals[key], total > 0 {
-            prefetchMonthAssetsIfNeeded(year: year, month: month)
-        }
-        return sorted
-    }
-
     private func filteredItems(for filter: CleanupFilterMode, from collection: [PhotoItem]) -> [PhotoItem] {
         let base = collection.filter { !$0.markedForDeletion && !isPhotoDeferredInTimeMachine($0) && isItemInSelectedAlbum($0) }
         switch filter {
@@ -1354,6 +1197,14 @@ private var hasScheduledInitialAssetLoad = false
         case .large:
             return base.filter { $0.isLargeFile }
         }
+    }
+
+    private func applyAlbumFilter(to items: [PhotoItem]) -> [PhotoItem] {
+        guard selectedAlbumFilter.collection != nil else { return items }
+        guard let ids = selectedAlbumAssetIds, !ids.isEmpty else {
+            return []
+        }
+        return items.filter { ids.contains($0.id) }
     }
 
     private func sampleAssetIdentifiers(for filter: CleanupFilterMode, limit: Int) -> [String] {
@@ -1469,126 +1320,27 @@ struct AlbumFilter: Identifiable, Equatable {
     }
 }
 
-@MainActor
-extension PhotoCleanupViewModel: PhotoLoaderDelegate {
-    func photoLoader(_ loader: PhotoLoader, didUpdateFetchResult fetchResult: PHFetchResult<PHAsset>) {
-        assetsFetchResult = fetchResult
-        Task { await self.photoRepository.bootstrapLibraryIfNeeded() }
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            var identifiers: Set<String> = []
-            fetchResult.enumerateObjects { asset, _, _ in
-                identifiers.insert(asset.localIdentifier)
-            }
-            self?.analysisCache.pruneMissingEntries(keeping: identifiers)
+extension PhotoCleanupViewModel {
+    private func integratePreparedItems(_ newItems: [PhotoItem]) {
+        guard !newItems.isEmpty else { return }
+        var indexMap: [String: Int] = [:]
+        for (index, item) in items.enumerated() {
+            indexMap[item.id] = index
         }
-        if !FeatureToggles.enableZeroLatencyPipeline {
-            rebuildMonthAssetTotals(from: fetchResult)
-        }
-    }
-
-    func photoLoader(_ loader: PhotoLoader, didLoadAssets assets: [PHAsset]) {
-        ingestAssets(assets)
-        for asset in assets where asset.mediaType == .video || asset.mediaSubtypes.contains(.photoLive) {
-            preheatVideo(for: asset)
-        }
-    }
-
-    private func preheatVideo(for asset: PHAsset) {
-        let options = PHVideoRequestOptions()
-        options.deliveryMode = .mediumQualityFormat
-        options.isNetworkAccessAllowed = true
-        PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { _, _, _ in }
-    }
-
-    private func rebuildMonthAssetTotals(from fetchResult: PHFetchResult<PHAsset>) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self else { return }
-            var counts: [String: Int] = [:]
-            let calendar = Calendar.current
-            fetchResult.enumerateObjects { asset, _, _ in
-                guard let date = asset.creationDate ?? asset.modificationDate else { return }
-                let comps = calendar.dateComponents([.year, .month], from: date)
-                guard let year = comps.year, let month = comps.month else { return }
-                let key = "\(year)-\(month)"
-                counts[key, default: 0] += 1
-            }
-            DispatchQueue.main.async {
-                self.monthAssetTotals = counts
-                #if DEBUG
-                print("[MonthAssetTotals] totals=\(counts)")
-                #endif
+        for item in newItems {
+            if let idx = indexMap[item.id] {
+                items[idx] = item
+            } else {
+                indexMap[item.id] = items.count
+                items.append(item)
             }
         }
     }
 
-    private func prefetchMonthAssetsIfNeeded(year: Int, month: Int) {
-        if FeatureToggles.enableApplePhotosArchitecture {
-            return
-        }
-        let key = "\(year)-\(month)"
-        guard !monthPrefetchingKeys.contains(key) else { return }
-        monthPrefetchingKeys.insert(key)
-
-        if FeatureToggles.enableZeroLatencyPipeline {
-            let task = Task<Void, Never> { [weak self] in
-                guard let self else { return }
-                let momentIds = self.metadataSnapshot.monthMomentIdentifiers[key] ?? []
-                let descriptors: [AssetDescriptor]
-                if !momentIds.isEmpty {
-                    descriptors = await self.photoRepository.fetchAssets(forMomentIdentifiers: momentIds, limit: 400)
-                } else {
-                    descriptors = await self.photoRepository.prefetchMonth(year, month: month, limit: 400)
-                }
-                guard !Task.isCancelled else { return }
-                let assets = descriptors.map(\.asset)
-                await MainActor.run {
-                    self.ingestAssets(assets)
-                    self.monthPrefetchingKeys.remove(key)
-                }
-                self.imagePipeline.prefetch(assets, targetSize: CGSize(width: 280, height: 280))
-                let ids = assets.map(\.localIdentifier)
-                self.preloadThumbnails(for: ids, target: .tinderCard)
-            }
-            Task { [weak self] in
-                guard let self else { return }
-                await self.taskPool.insert(task, scope: .prefetch)
-            }
-            return
-        }
-
-        guard let fetchResult = assetsFetchResult else { return }
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self else { return }
-            let assets = self.assets(in: fetchResult, year: year, month: month)
-            let limitedAssets = Array(assets.prefix(400))
-            DispatchQueue.main.async {
-                self.ingestAssets(limitedAssets)
-                self.monthPrefetchingKeys.remove(key)
-            }
-        }
-    }
-
-    private func buildPhotoItems(from assets: [PHAsset]) -> [PhotoItem] {
-        guard !assets.isEmpty else { return [] }
-        let cacheEntries = analysisCache.snapshot()
-        var incoming: [PhotoItem] = []
-        for asset in assets {
-            if Task.isCancelled { return [] }
-            let estimatedSize = PhotoCleanupViewModel.assetResourceSizeStatic(for: asset)
-            var item = photoItem(for: asset, estimatedSize: estimatedSize)
-            let id = item.id
-            if let entry = cacheEntries[id],
-               entry.version == PhotoAnalysisCacheEntry.currentVersion,
-               entry.fileSize == item.fileSize {
-                Self.applyCachedEntry(entry, to: &item)
-            }
-            incoming.append(item)
-        }
-        restoreSelectionStates(in: &incoming)
-        return incoming.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
-    }
-
-    nonisolated private static func buildZeroLatencyItems(from assets: [PHAsset], cache: [String: PhotoAnalysisCacheEntry]) -> [PhotoItem] {
+    private static func buildZeroLatencyItems(
+        from assets: [PHAsset],
+        cache: [String: PhotoAnalysisCacheEntry]
+    ) -> [PhotoItem] {
         guard !assets.isEmpty else { return [] }
         var incoming: [PhotoItem] = []
         for asset in assets {
@@ -1604,23 +1356,6 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
             incoming.append(item)
         }
         return incoming.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
-    }
-
-    private func integratePreparedItems(_ newItems: [PhotoItem]) {
-        guard !newItems.isEmpty else { return }
-        var indexMap: [String: Int] = [:]
-        for (index, item) in items.enumerated() {
-            indexMap[item.id] = index
-        }
-        for item in newItems {
-            loadedAssetIdentifiers.insert(item.id)
-            if let idx = indexMap[item.id] {
-                items[idx] = item
-            } else {
-                indexMap[item.id] = items.count
-                items.append(item)
-            }
-        }
     }
 
     private func configureLargeImagePipeline() async {
@@ -1675,8 +1410,8 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
             }
         }
         guard !sessionItems.isEmpty else { return }
-        let lower = max(0, center - 2)
-        let upper = min(sessionItems.count - 1, center + 4)
+        let lower = max(0, center - 5)
+        let upper = min(sessionItems.count - 1, center + 8)
         guard lower <= upper else { return }
         let ids = (lower...upper).compactMap { sessionItems[safe: $0]?.id }
         preloadThumbnails(for: ids, target: .tinderCard)
@@ -1688,7 +1423,7 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
         return CGSize(width: bounds.width * scale, height: bounds.height * scale)
     }
 
-private func resetLargeImagePipeline() async {
+    private func resetLargeImagePipeline() async {
         if FeatureToggles.enableApplePhotosArchitecture, let session = activeSession {
             await fullImageStore.reset(sessionId: session.id)
         } else {
@@ -1703,19 +1438,18 @@ private func resetLargeImagePipeline() async {
 
 extension PhotoCleanupViewModel: PhotoSessionManagerDelegate {
     func photoSessionManager(_ manager: PhotoSessionManager, didUpdate session: PhotoSession) {
-        guard FeatureToggles.enableApplePhotosArchitecture, session.id == activeSession?.id else { return }
+        guard FeatureToggles.enableApplePhotosArchitecture else { return }
+        if session.id == allSession?.id {
+            Task { @MainActor in
+                self.applyAllSessionItems(session)
+            }
+        }
+        guard session.id == activeSession?.id else { return }
         Task { @MainActor in
-            var restoredItems = session.state.items
-            self.restoreSelectionStates(in: &restoredItems)
-            self.sessionItems = restoredItems
-            self.sessionItemIds = Set(restoredItems.map(\.id))
-            self.items = restoredItems
-            self.hasInitializedSession = true
+            self.applyRestoredSessionItems(from: session)
             self.currentIndex = min(self.currentIndex, max(self.sessionItems.count - 1, 0))
             self.updateThumbnailWindowIfNeeded(center: self.currentIndex)
-            Task {
-                await self.configureLargeImagePipeline()
-            }
+            Task { await self.configureLargeImagePipeline() }
         }
     }
 }

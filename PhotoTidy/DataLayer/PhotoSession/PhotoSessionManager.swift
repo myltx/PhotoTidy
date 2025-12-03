@@ -63,6 +63,10 @@ final class PhotoSessionManager {
         await preloadThumbnails(for: newItems)
     }
 
+    func resetSessions() {
+        sessions.removeAll()
+    }
+
     private func loadDescriptors(scope: PhotoSessionScope, offset: Int, limit: Int) async -> [AssetDescriptor] {
         switch scope {
         case .all:

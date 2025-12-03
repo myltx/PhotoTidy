@@ -28,14 +28,25 @@ struct PhotoCardView: View {
                     .padding(6)
                 }
             } else {
-                AssetRichPreviewView(
-                    asset: item.asset,
-                    contentMode: .aspectFit,
-                    onRequestFullImage: { id in
-                        viewModel.requestFullImage(for: id)
+                ZStack {
+                    if let image = viewModel.cachedLargeImage(for: item.id) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(Color.black.opacity(0.9))
+                            .padding(6)
+                    } else {
+                        AssetRichPreviewView(
+                            asset: item.asset,
+                            contentMode: .aspectFit,
+                            onRequestFullImage: { id in
+                                viewModel.requestFullImage(for: id)
+                            }
+                        )
+                        .padding(6)
                     }
-                )
-                .padding(6)
+                }
             }
 
             LinearGradient(
