@@ -30,7 +30,10 @@ struct PhotoCardView: View {
             } else {
                 AssetRichPreviewView(
                     asset: item.asset,
-                    contentMode: .aspectFit
+                    contentMode: .aspectFit,
+                    onRequestFullImage: { id in
+                        viewModel.requestFullImage(for: id)
+                    }
                 )
                 .padding(6)
             }

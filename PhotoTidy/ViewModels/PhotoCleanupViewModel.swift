@@ -90,6 +90,7 @@ private var hasScheduledInitialAssetLoad = false
     private var sessionPreparationTask: Task<SessionPreparationResult, Never>?
     private var sessionPreparationToken: UUID?
     private var activeSession: PhotoSession?
+    private var hasPrewarmedAllSession = false
 
     // MARK: - Computed Properties
     
@@ -189,6 +190,7 @@ private var hasScheduledInitialAssetLoad = false
             if !FeatureToggles.enableZeroLatencyPipeline || !FeatureToggles.lazyLoadPhotoSessions {
                 scheduleInitialAssetLoad()
             }
+            prewarmAllSessionIfNeeded()
         }
         
         NotificationCenter.default
@@ -254,6 +256,7 @@ private var hasScheduledInitialAssetLoad = false
 
             if newStatus != oldStatus && newStatus.isAuthorized {
                 self.ensureMetadataBootstrap()
+                self.prewarmAllSessionIfNeeded()
                 if !FeatureToggles.enableZeroLatencyPipeline || !FeatureToggles.lazyLoadPhotoSessions {
                     self.scheduleInitialAssetLoad()
                 }
@@ -282,6 +285,11 @@ private var hasScheduledInitialAssetLoad = false
     func showCleaner(filter: CleanupFilterMode) {
         ensureRealAssetPipeline()
         activeMonthContext = nil
+        if FeatureToggles.enableApplePhotosArchitecture {
+            activateFilterSession(filter: filter)
+            isShowingCleaner = true
+            return
+        }
         activeSession = nil
         isShowingCleaner = true
         updateSessionItems(for: filter)
@@ -313,6 +321,11 @@ private var hasScheduledInitialAssetLoad = false
 
     func thumbnail(for assetId: String, target: ThumbnailTarget) async -> UIImage? {
         await thumbnailStore.thumbnail(for: assetId, target: target)
+    }
+
+    func requestFullImage(for assetId: String) {
+        guard FeatureToggles.enableApplePhotosArchitecture, let index = sessionItems.firstIndex(where: { $0.id == assetId }) else { return }
+        updateLargeImageWindowIfNeeded(center: index)
     }
 
     func preloadThumbnails(for assetIds: [String], target: ThumbnailTarget) {
@@ -404,6 +417,10 @@ private var hasScheduledInitialAssetLoad = false
     // MARK: - Session Management
 
     func updateSessionItems(for filter: CleanupFilterMode) {
+        guard !FeatureToggles.enableApplePhotosArchitecture else {
+            currentFilter = filter
+            return
+        }
         self.currentFilter = filter
         let filtered = filteredItems(for: filter, from: items)
         sessionItems = filtered
@@ -412,6 +429,12 @@ private var hasScheduledInitialAssetLoad = false
     }
 
     func refreshSession() {
+        if FeatureToggles.enableApplePhotosArchitecture, let session = activeSession {
+            sessionItems = session.state.items
+            sessionItemIds = Set(session.state.items.map(\.id))
+            currentIndex = min(currentIndex, max(sessionItems.count - 1, 0))
+            return
+        }
         if let context = activeMonthContext {
             rebuildMonthSession(year: context.year, month: context.month)
         } else {
@@ -596,6 +619,15 @@ private var hasScheduledInitialAssetLoad = false
         cancelSessionPreparation()
         Task { await resetLargeImagePipeline() }
         Task { await thumbnailStore.resetCache() }
+    }
+
+    private func prewarmAllSessionIfNeeded() {
+        guard FeatureToggles.enableApplePhotosArchitecture, !hasPrewarmedAllSession else { return }
+        hasPrewarmedAllSession = true
+        let session = sessionManager.session(scope: .all)
+        Task {
+            await sessionManager.loadNextBatch(for: session)
+        }
     }
 
     private func cancelSessionPreparation() {
@@ -1049,12 +1081,33 @@ private var hasScheduledInitialAssetLoad = false
 
     private func activateMonthSession(year: Int, month: Int) {
         let scope = PhotoSessionScope.month(year: year, month: month)
+        activateSession(scope: scope, filter: .all)
+    }
+
+    private func activateFilterSession(filter: CleanupFilterMode) {
+        let scope: PhotoSessionScope = filter == .all ? .all : .filter(filter)
+        activateSession(scope: scope, filter: filter)
+    }
+
+    private func activateSession(scope: PhotoSessionScope, filter: CleanupFilterMode) {
+        currentFilter = filter
         let session = sessionManager.session(scope: scope)
         activeSession = session
         sessionItems = []
         sessionItemIds.removeAll()
-        Task {
-            await sessionManager.loadNextBatch(for: session)
+        items = []
+        currentIndex = 0
+        if session.state.items.isEmpty {
+            Task {
+                await sessionManager.loadNextBatch(for: session)
+            }
+        } else {
+            var restored = session.state.items
+            restoreSelectionStates(in: &restored)
+            sessionItems = restored
+            sessionItemIds = Set(restored.map(\.id))
+            items = restored
+            Task { await configureLargeImagePipeline() }
         }
     }
 
@@ -1652,9 +1705,11 @@ extension PhotoCleanupViewModel: PhotoSessionManagerDelegate {
     func photoSessionManager(_ manager: PhotoSessionManager, didUpdate session: PhotoSession) {
         guard FeatureToggles.enableApplePhotosArchitecture, session.id == activeSession?.id else { return }
         Task { @MainActor in
-            self.sessionItems = session.state.items
-            self.sessionItemIds = Set(session.state.items.map(\.id))
-            self.items = session.state.items
+            var restoredItems = session.state.items
+            self.restoreSelectionStates(in: &restoredItems)
+            self.sessionItems = restoredItems
+            self.sessionItemIds = Set(restoredItems.map(\.id))
+            self.items = restoredItems
             self.hasInitializedSession = true
             self.currentIndex = min(self.currentIndex, max(self.sessionItems.count - 1, 0))
             self.updateThumbnailWindowIfNeeded(center: self.currentIndex)

@@ -52,6 +52,13 @@ final class PhotoSessionManager {
             }
             newItems.append(item)
         }
+        if case let .filter(filterMode) = session.scope {
+            newItems = newItems.filter { matches($0, filter: filterMode) }
+            if newItems.isEmpty {
+                await loadNextBatch(for: session)
+                return
+            }
+        }
         session.append(items: newItems)
         await preloadThumbnails(for: newItems)
     }
@@ -76,6 +83,23 @@ final class PhotoSessionManager {
     private func preloadThumbnails(for items: [PhotoItem]) async {
         guard !items.isEmpty else { return }
         await thumbnailStore.preload(assetIds: items.map { $0.id }, target: .tinderCard)
+    }
+
+    private func matches(_ item: PhotoItem, filter: CleanupFilterMode) -> Bool {
+        switch filter {
+        case .all:
+            return true
+        case .similar:
+            return item.similarGroupId != nil
+        case .blurred:
+            return item.isBlurredOrShaky
+        case .screenshots:
+            return item.isScreenshot || item.isDocumentLike
+        case .documents:
+            return item.isDocumentLike
+        case .large:
+            return item.isLargeFile
+        }
     }
 }
 
