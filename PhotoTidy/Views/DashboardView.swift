@@ -9,7 +9,6 @@ struct DashboardView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
     var onShowTrash: (() -> Void)? = nil
     @State private var showingResumeResetAlert = false
-    @State private var resumeHeroImage: UIImage?
 
     var body: some View {
         NavigationStack {
@@ -124,190 +123,17 @@ private extension DashboardView {
     }
     
     private var startHeroCard: some View {
-        ZStack(alignment: .bottomLeading) {
-            Image("all_album_bg")
-                .resizable()
-                .scaledToFill()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
-
-            LinearGradient(
-                colors: [Color.black.opacity(0.85), Color.clear],
-                startPoint: .bottom,
-                endPoint: .top
-            )
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("推荐")
-                    .font(.system(size: 10, weight: .bold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Color.indigo.opacity(0.9))
-                    .foregroundColor(.white)
-                    .clipShape(Capsule())
-
-                Text("开始全相册整理")
-                    .font(.title2).bold()
-                    .foregroundColor(.white)
-
-                Text("左滑删除，右滑保留")
-                    .font(.caption)
-                    .foregroundColor(Color.white.opacity(0.8))
-
-                Button(action: {
-                    guard !viewModel.isLoading else { return }
-                    viewModel.showCleaner(filter: .all)
-                }) {
-                    Group {
-                        if viewModel.isLoading {
-                            HStack(spacing: 8) {
-                                ProgressView()
-                                    .progressViewStyle(.circular)
-                                Text("正在准备…")
-                                    .font(.system(size: 12, weight: .bold))
-                            }
-                            .foregroundColor(.secondary)
-                        } else {
-                            HStack(spacing: 6) {
-                                Image(systemName: "play.fill")
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundColor(Color("brand-start"))
-                                Text("立即开始")
-                                    .font(.system(size: 12, weight: .bold))
-                            }
-                            .foregroundColor(.primary)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color(UIColor.systemBackground).opacity(viewModel.isLoading ? 0.8 : 1))
-                    .cornerRadius(14)
-                }
-                .padding(.top, 6)
-                .disabled(viewModel.isLoading)
-            }
-            .padding(.leading, 20)
-            .padding(.bottom, 28)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 240)
-        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-        .shadow(color: .black.opacity(0.25), radius: 18, y: 10)
-        .onTapGesture {
-            guard !viewModel.isLoading else { return }
-            viewModel.showCleaner(filter: .all)
-        }
+        SmartCleanupStartCard(viewModel: viewModel)
     }
     
     private func resumeHeroCard(info: PhotoCleanupViewModel.SmartCleanupResumeInfo) -> some View {
-        ZStack(alignment: .bottomLeading) {
-            Group {
-                if let resumeHeroImage {
-                    Image(uiImage: resumeHeroImage)
-                        .resizable()
-                        .scaledToFill()
-                } else {
-                    Image("all_album_bg")
-                        .resizable()
-                        .scaledToFill()
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
-            .overlay(Color.black.opacity(0.35))
-
-            LinearGradient(
-                colors: [
-                    Color.black.opacity(0.9),
-                    Color.black.opacity(0.4),
-                    Color.clear
-                ],
-                startPoint: .bottom,
-                endPoint: .top
-            )
-
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    statusBadge
-                    Spacer()
-                    pendingBadge(count: info.pendingDeletionCount)
-                }
-
-                Text("继续上次进度")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundColor(.white)
-
-                if let dateText = formattedResumeDate(info.anchorPhoto?.creationDate) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(.system(size: 12, weight: .bold))
-                        Text("上次停留：\(dateText)")
-                    }
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(Color("brand-start").opacity(0.9))
-                }
-
-                Text(resumeSubtitle(count: info.pendingDeletionCount))
-                    .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.75))
-
-                HStack(spacing: 12) {
-                    Button {
-                        guard !viewModel.isLoading else { return }
-                        viewModel.resumeSmartCleanup()
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 12, weight: .bold))
-                            Text(viewModel.isLoading ? "准备中…" : "继续")
-                                .font(.system(size: 13, weight: .bold))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Color(UIColor.systemBackground))
-                        .foregroundColor(Color("brand-start"))
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .shadow(color: .black.opacity(0.2), radius: 10, y: 6)
-                    }
-                    .disabled(viewModel.isLoading)
-
-                    if FeatureToggles.showCleanupResetControls {
-                        Button {
-                            showingResumeResetAlert = true
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 48, height: 44)
-                                .background(Color.white.opacity(0.12))
-                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                        .stroke(Color.white.opacity(0.25), lineWidth: 1)
-                                )
-                        }
-                    }
-                }
-                .padding(.top, 8)
-            }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 28)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 240)
-        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-        .shadow(color: .black.opacity(0.25), radius: 18, y: 10)
-        .onTapGesture {
-            guard !viewModel.isLoading else { return }
-            viewModel.showCleaner(filter: .all)
-        }
-        .task(id: info.anchorPhoto?.id) {
-            if let id = info.anchorPhoto?.id {
-                resumeHeroImage = await viewModel.thumbnail(for: id, target: .tinderCard)
-            } else {
-                resumeHeroImage = nil
-            }
-        }
+        SmartCleanupHeroCard(
+            viewModel: viewModel,
+            info: info,
+            isLoading: viewModel.isLoading,
+            showReset: FeatureToggles.showCleanupResetControls,
+            onReset: { showingResumeResetAlert = true }
+        )
     }
 
     var smartCleanupTitle: some View {
@@ -460,51 +286,6 @@ private extension DashboardView {
         return "定期清理可保持充足空间"
     }
     
-    private var statusBadge: some View {
-        HStack(spacing: 6) {
-            ZStack {
-                Circle()
-                    .fill(Color.white.opacity(0.4))
-                    .frame(width: 10, height: 10)
-                Circle()
-                    .fill(Color.white)
-                    .frame(width: 6, height: 6)
-            }
-            Text("进行中")
-        }
-        .font(.system(size: 11, weight: .bold))
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(Color.indigo.opacity(0.75))
-        .clipShape(Capsule())
-    }
-    
-    private func pendingBadge(count: Int) -> some View {
-        Text(count > 0 ? "待删 \(count) 张" : "待删区为空")
-            .font(.system(size: 10, weight: .semibold))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Color.black.opacity(0.35))
-            .foregroundColor(.white.opacity(0.85))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
-            )
-    }
-    
-    private func resumeSubtitle(count: Int) -> String {
-        count > 0 ? "待删区中有 \(count) 张照片，记得尽快确认删除" : "等待你的下一次整理"
-    }
-    
-    private func formattedResumeDate(_ date: Date?) -> String? {
-        guard let date else { return nil }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "yyyy年 M月d日"
-        return formatter.string(from: date)
-    }
-    
     private var greetingText: String {
         let hour = Calendar.current.component(.hour, from: Date())
         switch hour {
@@ -598,6 +379,244 @@ private struct SmartTile: View {
             guard !hasAppeared else { return }
             hasAppeared = true
             onAppear?()
+        }
+    }
+}
+
+private struct SmartCleanupHeroCard: View {
+    @ObservedObject var viewModel: PhotoCleanupViewModel
+    let info: PhotoCleanupViewModel.SmartCleanupResumeInfo
+    let isLoading: Bool
+    let showReset: Bool
+    let onReset: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            Image("all_album_bg")
+                .resizable()
+                .scaledToFill()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                .overlay(Color.black.opacity(0.35))
+
+            LinearGradient(
+                colors: [Color("brand-start").opacity(0.85), Color.clear],
+                startPoint: .bottom,
+                endPoint: .top
+            )
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    AnimatedStatusBadge(label: "进行中")
+                    Spacer()
+                    PendingBadge(count: info.pendingDeletionCount, icon: "trash")
+                }
+
+                Text("继续整理")
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundColor(.white)
+                    .tracking(-0.5)
+
+                if let dateText = formattedResumeDate(info.anchorPhoto?.creationDate) {
+                    Label("上次停留：\(dateText)", systemImage: "clock.arrow.circlepath")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(Color("brand-start").opacity(0.9))
+                }
+
+                Text(resumeSubtitle(count: info.pendingDeletionCount))
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.75))
+
+                HStack(spacing: 12) {
+                    Button {
+                        guard !isLoading else { return }
+                        viewModel.resumeSmartCleanup()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: isLoading ? "hourglass" : "play.fill")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(Color("brand-start"))
+                            Text(isLoading ? "准备中…" : "继续")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.black)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .shadow(color: .black.opacity(0.25), radius: 12, y: 8)
+                    }
+                    .disabled(isLoading)
+
+                    if showReset {
+                        Button(action: onReset) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                        .frame(width: 48, height: 44)
+                        .background(Color.white.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                        )
+                    }
+                }
+                .padding(.top, 4)
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 36)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 240)
+        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 32, style: .continuous)
+                .stroke(Color.white.opacity(0.15), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.25), radius: 22, y: 14)
+        .onTapGesture {
+            guard !isLoading else { return }
+            viewModel.showCleaner(filter: .all)
+        }
+    }
+
+    private func resumeSubtitle(count: Int) -> String {
+        count > 0 ? "待删区中有 \(count) 张，记得尽快确认删除" : "等待你的下一次整理"
+    }
+
+    private func formattedResumeDate(_ date: Date?) -> String? {
+        guard let date else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy年 M月d日"
+        return formatter.string(from: date)
+    }
+}
+
+private struct SmartCleanupStartCard: View {
+    @ObservedObject var viewModel: PhotoCleanupViewModel
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            Image("all_album_bg")
+                .resizable()
+                .scaledToFill()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                .overlay(Color.black.opacity(0.35))
+
+            LinearGradient(
+                colors: [Color.black.opacity(0.85), Color.clear],
+                startPoint: .bottom,
+                endPoint: .top
+            )
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("推荐")
+                    .font(.system(size: 11, weight: .bold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.indigo.opacity(0.9))
+                    .foregroundColor(.white)
+                    .clipShape(Capsule())
+
+                Text("全相册整理")
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundColor(.white)
+                Text("左滑删除，右滑保留")
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.8))
+
+                Button {
+                    guard !viewModel.isLoading else { return }
+                    viewModel.showCleaner(filter: .all)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: viewModel.isLoading ? "hourglass" : "play.fill")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(Color.indigo)
+                        Text(viewModel.isLoading ? "准备中…" : "开始")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.black)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .shadow(color: .black.opacity(0.2), radius: 10, y: 6)
+                }
+                .disabled(viewModel.isLoading)
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 34)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 220)
+        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 32, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.25), radius: 18, y: 12)
+        .onTapGesture {
+            guard !viewModel.isLoading else { return }
+            viewModel.showCleaner(filter: .all)
+        }
+    }
+}
+
+private struct PendingBadge: View {
+    let count: Int
+    let icon: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(Color.indigo.opacity(0.9))
+            Text(count > 0 ? "待删 \(count) 张" : "待删区为空")
+                .font(.system(size: 10, weight: .medium))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.black.opacity(0.4))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.15), lineWidth: 1)
+        )
+    }
+}
+
+private struct AnimatedStatusBadge: View {
+    let label: String
+    @State private var animate = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ZStack {
+                Circle()
+                    .fill(Color.white.opacity(0.25))
+                    .frame(width: 12, height: 12)
+                    .scaleEffect(animate ? 1.6 : 0.6)
+                    .opacity(animate ? 0 : 1)
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 8, height: 8)
+            }
+            Text(label)
+                .font(.system(size: 11, weight: .bold))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.indigo.opacity(0.9))
+        .clipShape(Capsule())
+        .onAppear {
+            withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) {
+                animate = true
+            }
         }
     }
 }

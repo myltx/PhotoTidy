@@ -403,20 +403,11 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
 
     func updateSessionItems(for filter: CleanupFilterMode) {
         currentFilter = filter
-        refreshSession()
+        rebuildActiveSessionItems(resetIndex: true)
     }
 
     func refreshSession() {
-        if let session = activeSession {
-            applyRestoredSessionItems(from: session)
-        } else if let session = allSession {
-            let filtered = applyAlbumFilter(to: session.state.items)
-            sessionItems = filtered
-            currentIndex = min(currentIndex, max(sessionItems.count - 1, 0))
-        } else {
-            sessionItems = []
-            currentIndex = 0
-        }
+        rebuildActiveSessionItems(resetIndex: false)
     }
 
     func selectAlbumFilter(_ filter: AlbumFilter) {
@@ -431,12 +422,27 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
                 let ids = await self.fetchAssetIdentifiers(in: collection)
                 await MainActor.run {
                     self.selectedAlbumAssetIds = ids
-                    self.updateSessionItems(for: self.currentFilter)
+                    self.rebuildActiveSessionItems(resetIndex: true)
                 }
             }
         } else {
             selectedAlbumAssetIds = nil
-            updateSessionItems(for: currentFilter)
+            rebuildActiveSessionItems(resetIndex: true)
+        }
+    }
+
+    private func rebuildActiveSessionItems(resetIndex: Bool) {
+        let base: [PhotoItem]
+        if let context = activeMonthContext {
+            base = monthItems(year: context.year, month: context.month)
+        } else {
+            base = filteredItems(for: currentFilter, from: items)
+        }
+        sessionItems = base
+        if resetIndex {
+            currentIndex = 0
+        } else {
+            currentIndex = min(currentIndex, max(sessionItems.count - 1, 0))
         }
     }
 
@@ -956,9 +962,8 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         var restored = session.state.items
         restoreSelectionStates(in: &restored)
         integratePreparedItems(restored)
-        let filtered = applyAlbumFilter(to: restored)
-        sessionItems = filtered
-        currentIndex = min(currentIndex, max(filtered.count - 1, 0))
+        let shouldReset = sessionItems.isEmpty
+        rebuildActiveSessionItems(resetIndex: shouldReset)
         Task { await configureLargeImagePipeline() }
     }
 
@@ -968,7 +973,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         restoreSelectionStates(in: &restored)
         items = restored
         if !isShowingCleaner {
-            sessionItems = applyAlbumFilter(to: restored)
+            rebuildActiveSessionItems(resetIndex: false)
         }
         scheduleBackgroundAnalysisIfNeeded()
     }
@@ -1181,6 +1186,18 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         return (year, month)
     }
     
+    private func monthItems(year: Int, month: Int) -> [PhotoItem] {
+        let calendar = Calendar.current
+        let filtered = items.filter { item in
+            guard !item.markedForDeletion,
+                  let date = item.creationDate else { return false }
+            let comps = calendar.dateComponents([.year, .month], from: date)
+            guard comps.year == year, comps.month == month else { return false }
+            return !isPhotoDeferredInTimeMachine(item) && isItemInSelectedAlbum(item)
+        }
+        return filtered.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
+    }
+
     private func filteredItems(for filter: CleanupFilterMode, from collection: [PhotoItem]) -> [PhotoItem] {
         let base = collection.filter { !$0.markedForDeletion && !isPhotoDeferredInTimeMachine($0) && isItemInSelectedAlbum($0) }
         switch filter {
@@ -1197,14 +1214,6 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         case .large:
             return base.filter { $0.isLargeFile }
         }
-    }
-
-    private func applyAlbumFilter(to items: [PhotoItem]) -> [PhotoItem] {
-        guard selectedAlbumFilter.collection != nil else { return items }
-        guard let ids = selectedAlbumAssetIds, !ids.isEmpty else {
-            return []
-        }
-        return items.filter { ids.contains($0.id) }
     }
 
     private func sampleAssetIdentifiers(for filter: CleanupFilterMode, limit: Int) -> [String] {

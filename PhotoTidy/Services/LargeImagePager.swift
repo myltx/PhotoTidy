@@ -18,13 +18,14 @@ actor LargeImagePager {
     }
 
     func ensureWindow(centerIndex: Int) async -> [String: UIImage] {
-        guard !assets.isEmpty else { return [:] }
+        let snapshot = assets
+        guard !snapshot.isEmpty else { return [:] }
         let indexes = [centerIndex, centerIndex + 1, centerIndex + 2].filter {
-            $0 >= 0 && $0 < assets.count
+            $0 >= 0 && $0 < snapshot.count
         }
 
         for index in indexes {
-            let asset = assets[index]
+            let asset = snapshot[index]
             let identifier = asset.localIdentifier
             if cache[identifier] == nil {
                 if let image = await requestImage(for: asset) {
@@ -34,7 +35,7 @@ actor LargeImagePager {
             }
         }
 
-        trimCache(keeping: Set(indexes.map { assets[$0].localIdentifier }))
+        trimCache(keeping: Set(indexes.map { snapshot[$0].localIdentifier }))
         return cache
     }
 
