@@ -67,6 +67,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     private let largeImagePager = LargeImagePager()
     private let fullImageStore = FullImageStore()
     private let sessionManager: PhotoSessionManager
+    private let libraryPreheater: PhotoLibraryPreheater
     private let backgroundScheduler = BackgroundJobScheduler()
     private let analysisChunkSize = 24
     private let baseAnalysisPause: UInt64 = 120_000_000
@@ -173,6 +174,9 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             analysisCache: analysisCache,
             thumbnailStore: thumbnailStore
         )
+        self.libraryPreheater = PhotoLibraryPreheater(
+            thumbnailStore: thumbnailStore
+        )
         super.init()
         PhotoCleanupViewModel.shared = self
         sessionManager.delegate = self
@@ -183,6 +187,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
             ensureMetadataBootstrap()
             loadAlbumFiltersIfNeeded()
             refreshAssetsFetchResult()
+            startLibraryPreheaterIfNeeded()
         }
         
         NotificationCenter.default
@@ -250,6 +255,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
                 self.ensureMetadataBootstrap()
                 self.loadAlbumFiltersIfNeeded()
                 self.refreshAssetsFetchResult()
+                self.startLibraryPreheaterIfNeeded()
             }
         }
     }
@@ -262,6 +268,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.assetsFetchResult = details.fetchResultAfterChanges
+            Task { await self.libraryPreheater.resetProgress() }
             if let updatedResult = self.assetsFetchResult {
                 DispatchQueue.global(qos: .utility).async { [weak self] in
                     var identifiers: Set<String> = []
@@ -543,6 +550,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         Task { await resetLargeImagePipeline() }
         Task { await thumbnailStore.resetCache() }
         sessionTrimmedCounts.removeAll()
+        Task { await libraryPreheater.resetProgress() }
     }
 
     private func prewarmAllSessionIfNeeded() {
@@ -559,6 +567,10 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
                 self.applyAllSessionItems(session)
             }
         }
+    }
+
+    private func startLibraryPreheaterIfNeeded() {
+        Task { await libraryPreheater.start() }
     }
 
     private func cancelSessionPreparation() {
@@ -794,12 +806,6 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         }
     }
 
-    private func removeItemFromGlobalCollection(item: PhotoItem) {
-        if let index = items.firstIndex(where: { $0.id == item.id }) {
-            items.remove(at: index)
-        }
-    }
-
     private func shouldThrottleUserAction() -> Bool {
         let now = CFAbsoluteTimeGetCurrent()
         if now - lastActionTimestamp < swipeThrottleInterval {
@@ -825,7 +831,6 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         guard !shouldThrottleUserAction() else { return }
         recordConfirmation(for: currentItem)
         removeCurrentItemFromSession()
-        removeItemFromGlobalCollection(item: currentItem)
     }
     
     func skipCurrent() {

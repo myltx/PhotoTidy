@@ -229,6 +229,21 @@ actor PhotoRepository {
         return cancelled ? [] : identifiers
     }
 
+    func assetCount(query: PhotoQuery = .all) async -> Int {
+        await bootstrapLibraryIfNeeded()
+        return fetchResult(for: query)?.count ?? 0
+    }
+
+    func descriptors(query: PhotoQuery = .all, range: Range<Int>) async -> [AssetDescriptor] {
+        await bootstrapLibraryIfNeeded()
+        guard let fetchResult = fetchResult(for: query) else { return [] }
+        let lower = max(range.lowerBound, 0)
+        guard lower < fetchResult.count else { return [] }
+        let upper = min(range.upperBound, fetchResult.count)
+        guard lower < upper else { return [] }
+        return collectDescriptors(from: fetchResult, range: lower..<upper)
+    }
+
     private func fetchResult(for query: PhotoQuery) -> PHFetchResult<PHAsset>? {
         if let cached = scopedFetchResults[query] {
             return cached
