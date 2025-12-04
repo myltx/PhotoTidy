@@ -4,6 +4,8 @@ struct DecisionCenterView: View {
     var onDetailVisibilityChange: (Bool) -> Void = { _ in }
     @StateObject private var pendingViewModel = PhotoFeedViewModel(intent: .pending(kind: .pendingDeletion))
     @StateObject private var skippedViewModel = PhotoFeedViewModel(intent: .pending(kind: .skipped))
+    @AppStorage(DecisionPreferenceKey.ignoreFavorites.rawValue) private var ignoreFavorites = true
+    @AppStorage(DecisionPreferenceKey.confirmDeletion.rawValue) private var confirmDeletion = true
 
     var body: some View {
         ScrollView {
@@ -19,7 +21,8 @@ struct DecisionCenterView: View {
                         viewModel: pendingViewModel,
                         accent: .red,
                         mode: .pendingDeletion,
-                        onVisibilityChange: onDetailVisibilityChange
+                        onVisibilityChange: onDetailVisibilityChange,
+                        requireDeletionConfirmation: confirmDeletion
                     )
                 } label: {
                     DecisionEntryCard(
@@ -38,7 +41,8 @@ struct DecisionCenterView: View {
                         viewModel: skippedViewModel,
                         accent: .blue,
                         mode: .skipped,
-                        onVisibilityChange: onDetailVisibilityChange
+                        onVisibilityChange: onDetailVisibilityChange,
+                        requireDeletionConfirmation: confirmDeletion
                     )
                 } label: {
                     DecisionEntryCard(
@@ -49,6 +53,11 @@ struct DecisionCenterView: View {
                         accent: .blue
                     )
                 }
+
+                PreferenceCard(
+                    ignoreFavorites: $ignoreFavorites,
+                    confirmDeletion: $confirmDeletion
+                )
             }
         }
         .padding(24)
@@ -61,6 +70,45 @@ struct DecisionCenterView: View {
             if case .asset = $0.payload { return true }
             return false
         }.count
+    }
+}
+
+private enum DecisionPreferenceKey: String {
+    case ignoreFavorites = "decision.ignoreFavorites"
+    case confirmDeletion = "decision.confirmDeletion"
+}
+
+private struct PreferenceCard: View {
+    @Binding var ignoreFavorites: Bool
+    @Binding var confirmDeletion: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("偏好设置")
+                .font(.headline)
+            Toggle(isOn: $ignoreFavorites) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("忽略收藏照片")
+                    Text("开启后，收藏的照片不会进入待删或待确认流程。")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+            }
+            Toggle(isOn: $confirmDeletion) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("删除前提示")
+                    Text("每次批量删除前弹出二次确认弹框。")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
     }
 }
 
@@ -78,6 +126,7 @@ private struct DecisionListView: View {
     let accent: Color
     let mode: Mode
     let onVisibilityChange: (Bool) -> Void
+    let requireDeletionConfirmation: Bool
 
     @State private var selection: Set<String> = []
     @State private var hiddenIds: Set<String> = []
@@ -117,7 +166,7 @@ private struct DecisionListView: View {
             if mode == .pendingDeletion && !assetItems.isEmpty {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
-                        showBulkDeleteConfirm = true
+                        handleBulkDeleteTapped()
                     } label: {
                         Image(systemName: "trash.slash")
                     }
@@ -205,7 +254,7 @@ private struct DecisionListView: View {
                     title: "删除",
                     tint: .red,
                     disabled: selection.isEmpty,
-                    action: { showSelectionDeleteConfirm = true }
+                    action: handleSelectionDeleteTapped
                 )
                 DecisionActionButton(
                     systemName: "checkmark.seal",
@@ -221,6 +270,22 @@ private struct DecisionListView: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(Color(.secondarySystemBackground))
         )
+    }
+
+    private func handleBulkDeleteTapped() {
+        if requireDeletionConfirmation {
+            showBulkDeleteConfirm = true
+        } else {
+            performBulkDelete()
+        }
+    }
+
+    private func handleSelectionDeleteTapped() {
+        if requireDeletionConfirmation {
+            showSelectionDeleteConfirm = true
+        } else {
+            performDeleteSelection()
+        }
     }
 
     private var assetItems: [PhotoFeedItem] {
