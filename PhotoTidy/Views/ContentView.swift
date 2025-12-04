@@ -1,229 +1,124 @@
 import SwiftUI
-import Photos
 
 struct ContentView: View {
-    @StateObject private var viewModel = PhotoCleanupViewModel()
+    @State private var selection: AppTab = .dashboard
+    @State private var tabBarHidden = false
 
     var body: some View {
-        ZStack {
-            // Layer 1: Background color that fills the entire screen
-            Color(UIColor.systemGray6)
-                .ignoresSafeArea()
-
-            // Layer 2: The actual content, which respects safe areas by default
+        VStack(spacing: 0) {
             ZStack {
-                switch viewModel.authorizationStatus {
-                case .authorized, .limited:
-                    MainAppView(viewModel: viewModel)
-                case .denied, .restricted:
-                    PermissionDeniedView()
-                case .notDetermined:
-                    PermissionRequestView(viewModel: viewModel)
-                @unknown default:
-                    Text("未知相册权限状态")
-                }
-
-                if shouldShowSplash {
-                    SplashLoadingView()
-                        .transition(.opacity)
-                        .zIndex(1)
-                }
-
-                if shouldShowMetadataBootstrapOverlay {
-                    InitialMetadataLoadingView()
-                        .transition(.opacity)
-                        .zIndex(2)
-                }
+                tabContent(for: selection)
+            }
+            if !tabBarHidden {
+                CustomTabBar(selection: $selection)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .applyColorScheme(viewModel.selectedTheme.preferredColorScheme)
-        .onAppear {
-            if viewModel.authorizationStatus == .authorized || viewModel.authorizationStatus == .limited {
-                viewModel.ensureAssetsPrepared()
-            }
-        }
+        .animation(.easeInOut(duration: 0.2), value: tabBarHidden)
     }
 
-    private var shouldShowSplash: Bool {
-        (viewModel.authorizationStatus == .authorized || viewModel.authorizationStatus == .limited) &&
-        viewModel.isLoading &&
-        viewModel.items.isEmpty
-    }
-
-    private var shouldShowMetadataBootstrapOverlay: Bool {
-        (viewModel.authorizationStatus == .authorized || viewModel.authorizationStatus == .limited) &&
-        viewModel.metadataSnapshot.needsBootstrap
-    }
-}
-
-private extension View {
     @ViewBuilder
-    func applyColorScheme(_ scheme: ColorScheme?) -> some View {
-        if let scheme {
-            preferredColorScheme(scheme)
-        } else {
-            self
+    private func tabContent(for tab: AppTab) -> some View {
+        switch tab {
+        case .dashboard:
+            DashboardView()
+        case .carousel:
+            CarouselReviewView()
+        case .grouped:
+            GroupedReviewView()
+        case .ranked:
+            RankedReviewView()
+        case .timeline:
+            TimelineView()
+        case .decision:
+            DecisionCenterContainerView(tabBarHidden: $tabBarHidden)
         }
     }
 }
 
-// MARK: - Main App View Structure
-struct MainAppView: View {
-    @ObservedObject var viewModel: PhotoCleanupViewModel
+private enum AppTab: String, CaseIterable, Identifiable {
+    case dashboard
+    case carousel
+    case grouped
+    case ranked
+    case timeline
+    case decision
 
-    var body: some View {
-        TabView(selection: $viewModel.currentTab) {
-            DashboardTab(viewModel: viewModel)
-                .tabItem {
-                    Label("首页", systemImage: "house.fill")
-                }
-                .tag(AppView.dashboard)
+    var id: String { rawValue }
 
-            TimeMachineTab(viewModel: viewModel)
-                .tabItem {
-                    Label("时光机", systemImage: "clock.arrow.circlepath")
-                }
-                .tag(AppView.timeMachine)
-
-            SettingsView(viewModel: viewModel)
-                .tabItem {
-                    Label("设置", systemImage: "gearshape.fill")
-                }
-                .tag(AppView.settings)
+    var title: String {
+        switch self {
+        case .dashboard: return "仪表盘"
+        case .carousel: return "滑动"
+        case .grouped: return "相似"
+        case .ranked: return "专项"
+        case .timeline: return "时光机"
+        case .decision: return "决策"
         }
-        .tint(Color("brand-start"))
-        .fullScreenCover(isPresented: $viewModel.isShowingCleaner) {
-            CleanerContainerView(viewModel: viewModel)
-        }
-        .sheet(item: $viewModel.activeDetail, onDismiss: {
-            viewModel.dismissDetail()
-        }) { detail in
-            switch detail {
-            case .similar:
-                SimilarComparisonView(viewModel: viewModel)
-            case .blurry:
-                BlurryReviewView(viewModel: viewModel)
-            case .screenshots:
-                ScreenshotDocumentView(viewModel: viewModel)
-            case .largeFiles:
-                LargeFilesView(viewModel: viewModel)
-            case .success:
-                SuccessSummaryView(viewModel: viewModel)
-            }
+    }
+
+    var icon: String {
+        switch self {
+        case .dashboard: return "speedometer"
+        case .carousel: return "square.stack.3d.forward.dottedline"
+        case .grouped: return "square.grid.2x2"
+        case .ranked: return "chart.bar"
+        case .timeline: return "calendar"
+        case .decision: return "tray.full"
         }
     }
 }
 
-private struct DashboardTab: View {
-    @ObservedObject var viewModel: PhotoCleanupViewModel
-    @State private var showingTrash = false
+private struct CustomTabBar: View {
+    @Binding var selection: AppTab
 
     var body: some View {
-        DashboardView(viewModel: viewModel, onShowTrash: {
-            showingTrash = true
-        })
-        .sheet(isPresented: $showingTrash) {
-            TrashView(viewModel: viewModel)
-                .presentationDetents([.fraction(0.5), .large])
-                .presentationDragIndicator(.visible)
-        }
-    }
-}
-
-private struct TimeMachineTab: View {
-    @ObservedObject var viewModel: PhotoCleanupViewModel
-
-    var body: some View {
-        TimeMachineView(viewModel: viewModel)
-    }
-}
-
-
-// MARK: - Permission Views
-struct PermissionRequestView: View {
-    @ObservedObject var viewModel: PhotoCleanupViewModel
-    
-    var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "photo.on.rectangle.angled")
-                .font(.system(size: 60))
-                .foregroundColor(Color("brand-start"))
-            Text("欢迎使用智能相册清理")
-                .font(.title).bold()
-            Text("我们需要访问您的相册以智能分析和管理您的照片。您的数据只会在本地处理，我们绝不会上传您的任何隐私。")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 30)
-            
-            Button(action: { viewModel.requestAuthorization() }) {
-                Text("授权访问相册")
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .frame(height: 55)
+        HStack(spacing: 12) {
+            ForEach(AppTab.allCases) { tab in
+                Button {
+                    selection = tab
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 16, weight: .semibold))
+                        Text(tab.title)
+                            .font(.caption2)
+                    }
+                    .foregroundColor(selection == tab ? .white : .secondary)
+                    .padding(.vertical, 8)
                     .frame(maxWidth: .infinity)
                     .background(
-                        LinearGradient(
-                            gradient: Gradient(colors: [Color("brand-start"), Color("brand-end")]),
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(selection == tab ? Color.accentColor : Color(.secondarySystemBackground))
                     )
-                    .cornerRadius(16)
-            }
-            .padding(.horizontal, 40)
-            .shadow(color: Color("brand-start").opacity(0.4), radius: 10, y: 5)
-
-        }
-    }
-}
-
-struct PermissionDeniedView: View {
-    var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "xmark.octagon.fill")
-                .font(.system(size: 50))
-                .foregroundColor(.red)
-            Text("无法访问相册")
-                .font(.title2).bold()
-            Text("请在“设置 > 隐私 > 照片”中允许本应用访问，以便开始清理。")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-            
-            if let url = URL(string: UIApplication.openSettingsURLString) {
-                Button(action: { UIApplication.shared.open(url) }) {
-                    Text("前往设置")
-                        .font(.headline)
                 }
-                .padding(.top)
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
     }
 }
 
+private struct DecisionCenterContainerView: View {
+    @Binding var tabBarHidden: Bool
 
-// BottomNavBar/ NavButton removed in favor of native TabView
-
-private struct InitialMetadataLoadingView: View {
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.28)
-                .ignoresSafeArea()
-            VStack(spacing: 14) {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .scaleEffect(1.2)
-                Text("正在初始化相册信息…")
-                    .font(.headline)
-                Text("首次扫描仅本地进行，请稍候")
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
-            }
-            .padding(32)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .shadow(color: Color.black.opacity(0.15), radius: 25, y: 12)
+        NavigationStack {
+            DecisionCenterView(onDetailVisibilityChange: handleVisibilityChange)
+                .navigationTitle("决策中心")
+        }
+        .onAppear {
+            handleVisibilityChange(false)
+        }
+    }
+
+    private func handleVisibilityChange(_ hidden: Bool) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            tabBarHidden = hidden
         }
     }
 }
