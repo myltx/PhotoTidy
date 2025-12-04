@@ -3,12 +3,17 @@ import SwiftUI
 struct TimelineView: View {
     @StateObject private var viewModel = TimelineViewModel()
     @State private var selectedBucket: TimelineBucketSnapshot?
+    @State private var selectedYear: Int?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 24) {
-                    ForEach(viewModel.yearSections, id: \.year) { section in
+                    if !yearOptions.isEmpty {
+                        YearFilterBar(options: yearOptions, selectedYear: $selectedYear)
+                            .padding(.bottom, 8)
+                    }
+                    ForEach(filteredSections, id: \.year) { section in
                         YearSectionView(section: section, action: { bucket in
                             selectedBucket = bucket
                         })
@@ -18,10 +23,25 @@ struct TimelineView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("时光机")
+            .onReceive(viewModel.$yearSections) { _ in
+                guard let year = selectedYear else { return }
+                if !yearOptions.contains(year) {
+                    selectedYear = nil
+                }
+            }
         }
         .sheet(item: $selectedBucket) { bucket in
             MonthDetailView(bucket: bucket)
         }
+    }
+
+    private var yearOptions: [Int] {
+        viewModel.yearSections.map(\.year).sorted(by: >)
+    }
+
+    private var filteredSections: [TimelineViewModel.YearSectionModel] {
+        guard let selectedYear else { return viewModel.yearSections }
+        return viewModel.yearSections.filter { $0.year == selectedYear }
     }
 }
 
@@ -53,6 +73,47 @@ private struct YearSectionView: View {
                 }
             }
         }
+    }
+}
+
+private struct YearFilterBar: View {
+    let options: [Int]
+    @Binding var selectedYear: Int?
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                filterButton(title: "全部", isSelected: selectedYear == nil) {
+                    selectedYear = nil
+                }
+                ForEach(options, id: \.self) { year in
+                    filterButton(title: "\(year)", isSelected: selectedYear == year) {
+                        if selectedYear == year {
+                            selectedYear = nil
+                        } else {
+                            selectedYear = year
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private func filterButton(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline.bold())
+                .foregroundColor(isSelected ? .white : .primary)
+                .padding(.vertical, 8)
+                .padding(.horizontal, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(isSelected ? Color.accentColor : Color(.secondarySystemBackground))
+                )
+        }
+        .buttonStyle(.plain)
+        .shadow(color: isSelected ? Color.accentColor.opacity(0.3) : .clear, radius: 6, x: 0, y: 3)
     }
 }
 
