@@ -13,7 +13,7 @@ struct PhotoLibraryBootstrapper {
         if limit > 0 {
             fetchOptions.fetchLimit = limit
         }
-        let fetchResult = PHAsset.fetchAssets(with: .image, options: fetchOptions)
+        let fetchResult = PHAsset.fetchAssets(with: fetchOptions)
         var results: [PhotoAssetMetadata] = []
         results.reserveCapacity(fetchResult.count)
         fetchResult.enumerateObjects { asset, _, _ in

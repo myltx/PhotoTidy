@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 enum CacheMissSource {
     case memory
@@ -8,6 +9,7 @@ enum CacheMissSource {
 actor CacheCoordinator {
     private let memoryPool = MemoryPool()
     private let diskVault: DiskVault
+    private let thumbnailBridge = ThumbnailBridge()
 
     init(database: PhotoStoreDatabase) {
         self.diskVault = DiskVault(database: database)
@@ -41,7 +43,39 @@ actor CacheCoordinator {
         return memoryHits + diskHits
     }
 
+    func thumbnailData(for asset: PhotoAssetMetadata, targetSize: CGSize) async -> Data? {
+        if let cached = await memoryPool.thumbnailData(for: asset.id) {
+            return cached
+        }
+        if let disk = await diskVault.thumbnailData(for: asset.id) {
+            await memoryPool.store(thumbnailData: disk, for: asset.id)
+            return disk
+        }
+        guard let generated = await thumbnailBridge.makeThumbnail(for: asset, targetSize: targetSize) else {
+            return nil
+        }
+        await memoryPool.store(thumbnailData: generated, for: asset.id)
+        await diskVault.store(thumbnailData: generated, for: asset.id)
+        return generated
+    }
+
+    func warmThumbnails(for assets: [PhotoAssetMetadata], targetSize: CGSize) async {
+        guard !assets.isEmpty else { return }
+        await withTaskGroup(of: Void.self) { group in
+            for asset in assets {
+                group.addTask {
+                    _ = await self.thumbnailData(for: asset, targetSize: targetSize)
+                }
+            }
+        }
+    }
+
     func release(tag: CacheTag) async {
         await memoryPool.release(tag: tag)
+    }
+
+    func clearAll() async {
+        await memoryPool.clear()
+        await diskVault.clear()
     }
 }

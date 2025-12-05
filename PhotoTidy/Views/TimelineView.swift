@@ -170,19 +170,23 @@ private struct MonthDetailView: View {
                             )
                         }
                     }
-                }
-                .padding()
-                if !selectedAssetIds.isEmpty {
-                    Text("已选择 \(selectedAssetIds.count) 张，将加入待删区")
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
-                        .padding(.bottom)
-                }
             }
-            .navigationTitle(bucket.monthKey.title)
-            .toolbar {
-                Button("关闭") { dismiss() }
+            .padding()
+            if !selectedAssetIds.isEmpty {
+                Text("已选择 \(selectedAssetIds.count) 张，将加入待删区")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+                Button("加入待删区") {
+                    commitSelection()
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.bottom)
             }
+        }
+        .navigationTitle(bucket.monthKey.title)
+        .toolbar {
+            Button("关闭") { dismiss() }
+        }
         }
     }
 
@@ -205,6 +209,13 @@ private struct MonthDetailView: View {
         } else {
             selectedAssetIds.insert(id)
         }
+    }
+
+    private func commitSelection() {
+        guard !selectedAssetIds.isEmpty else { return }
+        let ids = Array(selectedAssetIds)
+        selectedAssetIds.removeAll()
+        PhotoStoreFacade.shared.applyDecision(assetIds: ids, newState: .pendingDeletion)
     }
 }
 

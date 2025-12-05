@@ -29,9 +29,11 @@ private struct GroupFeedSection: View {
                             group: group,
                             selection: binding,
                             state: groupStates[group.id] ?? .idle,
-                            onSkip: { markGroup(group.id, as: .skipped) },
+                            onSkip: {
+                                handleSkip(group: group)
+                            },
                             onConfirm: { ids in
-                                markGroup(group.id, as: .completed(kept: ids.count, deleted: group.members.count - ids.count))
+                                handleConfirm(group: group, keep: ids)
                             }
                         )
                     }
@@ -63,6 +65,26 @@ private struct GroupFeedSection: View {
         withAnimation {
             groupStates[id] = state
         }
+    }
+
+    private func handleSkip(group: PhotoGroupSnapshot) {
+        let ids = group.members.map(\.id)
+        guard !ids.isEmpty else { return }
+        PhotoStoreFacade.shared.applyDecision(assetIds: ids, newState: .skipped)
+        markGroup(group.id, as: .skipped)
+    }
+
+    private func handleConfirm(group: PhotoGroupSnapshot, keep ids: Set<String>) {
+        let allIds = group.members.map(\.id)
+        let keepIds = allIds.filter { ids.contains($0) }
+        let deleteIds = allIds.filter { !ids.contains($0) }
+        if !keepIds.isEmpty {
+            PhotoStoreFacade.shared.applyDecision(assetIds: keepIds, newState: .clean)
+        }
+        if !deleteIds.isEmpty {
+            PhotoStoreFacade.shared.applyDecision(assetIds: deleteIds, newState: .pendingDeletion)
+        }
+        markGroup(group.id, as: .completed(kept: keepIds.count, deleted: deleteIds.count))
     }
 }
 

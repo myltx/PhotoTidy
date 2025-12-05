@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 enum PrefetchPriority {
     case low
@@ -30,23 +31,30 @@ actor PrefetchManager {
         guard !plan.assets.isEmpty else { return }
         record("Prefetch \(plan.assets.count) for \(intent.cacheTag.rawValue) priority=\(plan.priority)")
         await coordinator.hydrate(plan.assets, tag: intent.cacheTag)
+        await coordinator.warmThumbnails(for: plan.assets, targetSize: plan.thumbnailSize)
     }
 
-    private func strategy(for intent: PhotoQueryIntent, assets: [PhotoAssetMetadata]) -> (assets: [PhotoAssetMetadata], priority: PrefetchPriority) {
+    private struct PrefetchPlan {
+        let assets: [PhotoAssetMetadata]
+        let priority: PrefetchPriority
+        let thumbnailSize: CGSize
+    }
+
+    private func strategy(for intent: PhotoQueryIntent, assets: [PhotoAssetMetadata]) -> PrefetchPlan {
         switch intent {
         case .sequential:
-            return (Array(assets.prefix(3)), .high)
+            return PrefetchPlan(assets: Array(assets.prefix(3)), priority: .high, thumbnailSize: CGSize(width: 600, height: 600))
         case .grouped(let kind):
             let subset = kind == .similar ? assets : Array(assets.prefix(4))
-            return (subset, .normal)
+            return PrefetchPlan(assets: subset, priority: .normal, thumbnailSize: CGSize(width: 420, height: 420))
         case .ranked:
-            return (Array(assets.prefix(8)), .normal)
+            return PrefetchPlan(assets: Array(assets.prefix(8)), priority: .normal, thumbnailSize: CGSize(width: 320, height: 320))
         case .bucketed:
-            return (Array(assets.prefix(5)), .low)
+            return PrefetchPlan(assets: Array(assets.prefix(5)), priority: .low, thumbnailSize: CGSize(width: 260, height: 260))
         case .pending:
-            return (Array(assets.prefix(6)), .normal)
+            return PrefetchPlan(assets: Array(assets.prefix(6)), priority: .normal, thumbnailSize: CGSize(width: 320, height: 320))
         case .dashboard:
-            return ([], .low)
+            return PrefetchPlan(assets: [], priority: .low, thumbnailSize: CGSize(width: 200, height: 200))
         }
     }
 }

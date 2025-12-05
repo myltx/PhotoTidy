@@ -6,6 +6,7 @@ struct DecisionCenterView: View {
     @StateObject private var skippedViewModel = PhotoFeedViewModel(intent: .pending(kind: .skipped))
     @AppStorage(DecisionPreferenceKey.ignoreFavorites.rawValue) private var ignoreFavorites = true
     @AppStorage(DecisionPreferenceKey.confirmDeletion.rawValue) private var confirmDeletion = true
+    @State private var showClearAlert = false
 
     var body: some View {
         ScrollView {
@@ -58,11 +59,30 @@ struct DecisionCenterView: View {
                     ignoreFavorites: $ignoreFavorites,
                     confirmDeletion: $confirmDeletion
                 )
+                Button {
+                    showClearAlert = true
+                } label: {
+                    HStack {
+                        Image(systemName: "trash.circle.fill")
+                        Text("清除缓存并重新导入")
+                    }
+                    .font(.body.bold())
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
             }
         }
         .padding(24)
         .background(Color(.systemGroupedBackground))
         .navigationTitle("决策中心")
+        .alert("清除缓存？", isPresented: $showClearAlert) {
+            Button("立即清除", role: .destructive) {
+                PhotoStoreFacade.shared.clearAllCaches()
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("将删除本地索引与缩略图，并重新读取系统相册。")
+        }
     }
 
     private func assetCount(for viewModel: PhotoFeedViewModel) -> Int {
@@ -314,25 +334,35 @@ private struct DecisionListView: View {
         let ids = Set(assetItems.map(\.id))
         hiddenIds.formUnion(ids)
         selection.subtract(ids)
-        // TODO: 接入真实删除逻辑
+        PhotoStoreFacade.shared.removeAssets(assetIds: Array(ids))
     }
 
     private func performDeleteSelection() {
-        hiddenIds.formUnion(selection)
+        let ids = selection
+        hiddenIds.formUnion(ids)
         selection.removeAll()
-        // TODO: 接入真实删除逻辑
+        if ids.isEmpty { return }
+        if mode == .pendingDeletion {
+            PhotoStoreFacade.shared.removeAssets(assetIds: Array(ids))
+        } else {
+            PhotoStoreFacade.shared.applyDecision(assetIds: Array(ids), newState: .pendingDeletion)
+        }
     }
 
     private func performReturnToFlow() {
-        hiddenIds.formUnion(selection)
+        let ids = selection
+        hiddenIds.formUnion(ids)
         selection.removeAll()
-        // TODO: 写回主流程
+        guard !ids.isEmpty else { return }
+        PhotoStoreFacade.shared.applyDecision(assetIds: Array(ids), newState: .clean)
     }
 
     private func performConfirmKeep() {
-        hiddenIds.formUnion(selection)
+        let ids = selection
+        hiddenIds.formUnion(ids)
         selection.removeAll()
-        // TODO: 记录保留结果
+        guard !ids.isEmpty else { return }
+        PhotoStoreFacade.shared.applyDecision(assetIds: Array(ids), newState: .clean)
     }
 }
 

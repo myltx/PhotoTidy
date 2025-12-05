@@ -1,8 +1,10 @@
 import Foundation
+import CryptoKit
 
 actor DiskVault {
     private let database: PhotoStoreDatabase
-    private let thumbnailURL: URL
+    private let thumbnailManifestURL: URL
+    private let thumbnailsDirectory: URL
     private var thumbnailStore: [String: PhotoThumbnailDescriptor] = [:]
 
     init(database: PhotoStoreDatabase, baseDirectory: URL? = nil) {
@@ -15,8 +17,10 @@ actor DiskVault {
                 .appendingPathComponent("PhotoStoreVault", isDirectory: true)
         }
         try? FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
-        thumbnailURL = baseURL.appendingPathComponent("thumbnails.json")
-        thumbnailStore = Self.loadDictionary(url: thumbnailURL) ?? [:]
+        thumbnailManifestURL = baseURL.appendingPathComponent("thumbnails.json")
+        thumbnailsDirectory = baseURL.appendingPathComponent("Thumbnails", isDirectory: true)
+        try? FileManager.default.createDirectory(at: thumbnailsDirectory, withIntermediateDirectories: true)
+        thumbnailStore = Self.loadDictionary(url: thumbnailManifestURL) ?? [:]
     }
 
     func bootstrapIfNeeded(with assets: [PhotoAssetMetadata]) {
@@ -49,8 +53,26 @@ actor DiskVault {
         ids.compactMap { thumbnailStore[$0] }
     }
 
+    func store(thumbnailData: Data, for assetId: String) {
+        let url = thumbnailFileURL(for: assetId)
+        try? thumbnailData.write(to: url, options: .atomic)
+    }
+
+    func thumbnailData(for assetId: String) -> Data? {
+        let url = thumbnailFileURL(for: assetId)
+        return try? Data(contentsOf: url)
+    }
+
+    func clear() {
+        thumbnailStore.removeAll()
+        try? FileManager.default.removeItem(at: thumbnailManifestURL)
+        try? FileManager.default.removeItem(at: thumbnailsDirectory)
+        try? FileManager.default.createDirectory(at: thumbnailsDirectory, withIntermediateDirectories: true)
+        persistThumbnails()
+    }
+
     private func persistThumbnails() {
-        Self.persistDictionary(thumbnailStore, to: thumbnailURL)
+        Self.persistDictionary(thumbnailStore, to: thumbnailManifestURL)
     }
 
     private static func loadDictionary<T: Decodable>(url: URL) -> [String: T]? {
@@ -70,5 +92,11 @@ actor DiskVault {
         encoder.dateEncodingStrategy = .iso8601
         guard let data = try? encoder.encode(dictionary) else { return }
         try? data.write(to: url)
+    }
+
+    private func thumbnailFileURL(for assetId: String) -> URL {
+        let hash = SHA256.hash(data: Data(assetId.utf8))
+        let filename = hash.compactMap { String(format: "%02x", $0) }.joined()
+        return thumbnailsDirectory.appendingPathComponent("\(filename).jpg")
     }
 }

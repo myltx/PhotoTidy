@@ -1,13 +1,14 @@
 import SwiftUI
 import Photos
 import PhotosUI
+import UIKit
 
 struct AssetPreviewView: View {
     let metadata: PhotoAssetMetadata
     let cornerRadius: CGFloat
     let showOverlay: Bool
 
-    @State private var image: Image?
+    @State private var uiImage: UIImage?
 
     init(metadata: PhotoAssetMetadata, cornerRadius: CGFloat = 24, showOverlay: Bool = true) {
         self.metadata = metadata
@@ -17,8 +18,8 @@ struct AssetPreviewView: View {
 
     var body: some View {
         ZStack {
-            if let image {
-                image
+            if let uiImage {
+                Image(uiImage: uiImage)
                     .resizable()
                     .scaledToFill()
             } else {
@@ -33,10 +34,10 @@ struct AssetPreviewView: View {
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: cornerRadius))
-        .onAppear {
-            if image == nil {
-                loadImage()
-            }
+        .onAppear(perform: ensureLoaded)
+        .onChange(of: metadata.id) { _ in
+            uiImage = nil
+            ensureLoaded()
         }
     }
 }
@@ -62,16 +63,40 @@ private extension AssetPreviewView {
         .padding()
     }
 
-    func loadImage() {
+    func ensureLoaded() {
+        guard uiImage == nil else { return }
+        Task {
+            if let cached = await PhotoStoreFacade.shared.thumbnailImage(for: metadata) {
+                await MainActor.run {
+                    self.uiImage = cached
+                }
+            } else {
+                await loadFromPhotoKit()
+            }
+        }
+    }
+
+    func loadFromPhotoKit() async {
         guard let asset = metadata.resolvedAsset else { return }
-        let manager = PHImageManager.default()
-        let options = PHImageRequestOptions()
-        options.deliveryMode = .highQualityFormat
-        options.isNetworkAccessAllowed = true
-        let targetSize = CGSize(width: 600, height: 600)
-        manager.requestImage(for: asset, targetSize: targetSize, contentMode: .aspectFill, options: options) { uiImage, _ in
-            guard let uiImage else { return }
-            image = Image(uiImage: uiImage)
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let manager = PHImageManager.default()
+            let options = PHImageRequestOptions()
+            options.deliveryMode = .highQualityFormat
+            options.resizeMode = .fast
+            options.isNetworkAccessAllowed = true
+            manager.requestImage(
+                for: asset,
+                targetSize: CGSize(width: 600, height: 600),
+                contentMode: .aspectFill,
+                options: options
+            ) { uiImage, _ in
+                if let uiImage {
+                    Task { @MainActor in
+                        self.uiImage = uiImage
+                    }
+                }
+                continuation.resume()
+            }
         }
     }
 }

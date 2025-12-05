@@ -131,6 +131,51 @@ final class PhotoStoreDatabase {
         }
     }
 
+    func updateDecision(for ids: [String], state: PhotoDecisionState) {
+        guard !ids.isEmpty else { return }
+        queue.sync {
+            guard let db else { return }
+            sqlite3_exec(db, "BEGIN IMMEDIATE TRANSACTION", nil, nil, nil)
+            let placeholders = placeholdersList(count: ids.count)
+            let sql = "UPDATE metadata SET decision = ? WHERE id IN (\(placeholders));"
+            var statement: OpaquePointer?
+            sqlite3_prepare_v2(db, sql, -1, &statement, nil)
+            bindText(statement, index: 1, value: state.rawValue)
+            bindIds(ids, statement: statement, startIndex: 2)
+            sqlite3_step(statement)
+            sqlite3_finalize(statement)
+            rebuildFTS()
+            sqlite3_exec(db, "COMMIT", nil, nil, nil)
+        }
+    }
+
+    func deleteAssets(ids: [String]) {
+        guard !ids.isEmpty else { return }
+        queue.sync {
+            guard let db else { return }
+            sqlite3_exec(db, "BEGIN IMMEDIATE TRANSACTION", nil, nil, nil)
+            let placeholders = placeholdersList(count: ids.count)
+
+            var memberStatement: OpaquePointer?
+            let deleteMembersSQL = "DELETE FROM group_members WHERE asset_id IN (\(placeholders));"
+            sqlite3_prepare_v2(db, deleteMembersSQL, -1, &memberStatement, nil)
+            bindIds(ids, statement: memberStatement, startIndex: 1)
+            sqlite3_step(memberStatement)
+            sqlite3_finalize(memberStatement)
+
+            var metadataStatement: OpaquePointer?
+            let deleteMetadataSQL = "DELETE FROM metadata WHERE id IN (\(placeholders));"
+            sqlite3_prepare_v2(db, deleteMetadataSQL, -1, &metadataStatement, nil)
+            bindIds(ids, statement: metadataStatement, startIndex: 1)
+            sqlite3_step(metadataStatement)
+            sqlite3_finalize(metadataStatement)
+
+            sqlite3_exec(db, "DELETE FROM groups WHERE id NOT IN (SELECT DISTINCT group_id FROM group_members);", nil, nil, nil)
+            rebuildFTS()
+            sqlite3_exec(db, "COMMIT", nil, nil, nil)
+        }
+    }
+
     func timelineBuckets() -> [TimelineBucketSnapshot] {
         queue.sync {
             guard let db else { return [] }
@@ -245,6 +290,20 @@ final class PhotoStoreDatabase {
                 monthlyHighlights: highlights,
                 storageUsage: storageUsage
             )
+        }
+    }
+
+    func resetStore() {
+        queue.sync {
+            guard let db else { return }
+            sqlite3_exec(db, "BEGIN IMMEDIATE TRANSACTION", nil, nil, nil)
+            sqlite3_exec(db, "DELETE FROM metadata;", nil, nil, nil)
+            sqlite3_exec(db, "DELETE FROM metadata_fts;", nil, nil, nil)
+            sqlite3_exec(db, "DELETE FROM groups;", nil, nil, nil)
+            sqlite3_exec(db, "DELETE FROM group_members;", nil, nil, nil)
+            sqlite3_exec(db, "DELETE FROM analysis_results;", nil, nil, nil)
+            sqlite3_exec(db, "COMMIT;", nil, nil, nil)
+            sqlite3_exec(db, "VACUUM;", nil, nil, nil)
         }
     }
 
@@ -717,6 +776,17 @@ private extension PhotoStoreDatabase {
             )
         }
         return DeviceStorageUsage(totalBytes: 0, usedBytes: 0, freeBytes: 0, clearableBytes: clearableBytes)
+    }
+
+    func placeholdersList(count: Int) -> String {
+        guard count > 0 else { return "" }
+        return Array(repeating: "?", count: count).joined(separator: ",")
+    }
+
+    func bindIds(_ ids: [String], statement: OpaquePointer?, startIndex: Int32) {
+        for (offset, id) in ids.enumerated() {
+            bindText(statement, index: startIndex + Int32(offset), value: id)
+        }
     }
 }
 

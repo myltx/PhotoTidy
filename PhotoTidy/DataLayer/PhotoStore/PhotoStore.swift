@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 actor PhotoStore {
     private let database: PhotoStoreDatabase
@@ -9,17 +10,13 @@ actor PhotoStore {
     private var analysisWorker: AnalysisWorker?
     private var feedStates: [PhotoQueryIntent: PhotoFeedState] = [:]
     private var datasetCache: [PhotoQueryIntent: [PhotoFeedItem]] = [:]
+    private let seedCount: Int
 
-    init(seedCount: Int = 480, database: PhotoStoreDatabase = PhotoStoreDatabase()) {
+    init(seedCount: Int = 0, database: PhotoStoreDatabase = PhotoStoreDatabase()) {
         self.database = database
+        self.seedCount = seedCount
         self.cacheCoordinator = CacheCoordinator(database: database)
-        let photoLibraryAssets = PhotoLibraryBootstrapper().loadAssets(limit: seedCount)
-        let assets: [PhotoAssetMetadata]
-        if photoLibraryAssets.isEmpty {
-            assets = MockAssetProvider().makeAssets(count: seedCount)
-        } else {
-            assets = photoLibraryAssets
-        }
+        let assets = Self.loadAssets(limit: seedCount)
         database.bootstrapIfNeeded(with: assets)
         catalog = IndexCatalog(database: database)
         let worker = AnalysisWorker(
@@ -200,5 +197,51 @@ actor PhotoStore {
             state.status = .idle
             feedStates[intent] = state
         }
+    }
+
+    func thumbnailData(for asset: PhotoAssetMetadata, targetSize: CGSize) async -> Data? {
+        await cacheCoordinator.thumbnailData(for: asset, targetSize: targetSize)
+    }
+
+    func applyDecision(ids: [String], state: PhotoDecisionState) async -> [PhotoQueryIntent: PhotoFeedState] {
+        guard !ids.isEmpty else { return feedStates }
+        database.updateDecision(for: ids, state: state)
+        return await refreshFeedsAfterMutation()
+    }
+
+    func removeAssets(ids: [String]) async -> [PhotoQueryIntent: PhotoFeedState] {
+        guard !ids.isEmpty else { return feedStates }
+        database.deleteAssets(ids: ids)
+        return await refreshFeedsAfterMutation()
+    }
+
+    private func refreshFeedsAfterMutation() async -> [PhotoQueryIntent: PhotoFeedState] {
+        datasetCache.removeAll()
+        var updated: [PhotoQueryIntent: PhotoFeedState] = [:]
+        let intents = Array(feedStates.keys)
+        for intent in intents {
+            let state = await loadInitial(intent: intent)
+            updated[intent] = state
+        }
+        return updated
+    }
+
+    func clearAndReload() async {
+        await cacheCoordinator.clearAll()
+        database.resetStore()
+        let assets = Self.loadAssets(limit: seedCount)
+        database.bootstrapIfNeeded(with: assets)
+        await cacheCoordinator.bootstrap(with: assets)
+        datasetCache.removeAll()
+        feedStates.removeAll()
+    }
+
+    private static func loadAssets(limit: Int) -> [PhotoAssetMetadata] {
+        let photoLibraryAssets = PhotoLibraryBootstrapper().loadAssets(limit: limit)
+        if !photoLibraryAssets.isEmpty {
+            return photoLibraryAssets
+        }
+        let fallbackCount = limit > 0 ? limit : 500
+        return MockAssetProvider().makeAssets(count: fallbackCount)
     }
 }

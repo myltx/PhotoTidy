@@ -3,6 +3,7 @@ import Foundation
 actor MemoryPool {
     private var metadataCache: [String: PhotoAssetMetadata] = [:]
     private var thumbnailCache: [String: PhotoThumbnailDescriptor] = [:]
+    private var thumbnailDataCache: [String: Data] = [:]
     private var tagBindings: [CacheTag: Set<String>] = [:]
 
     func store(_ assets: [PhotoAssetMetadata], tag: CacheTag) {
@@ -29,12 +30,28 @@ actor MemoryPool {
         ids.compactMap { thumbnailCache[$0] }
     }
 
+    func thumbnailData(for id: String) -> Data? {
+        thumbnailDataCache[id]
+    }
+
+    func store(thumbnailData: Data, for id: String) {
+        thumbnailDataCache[id] = thumbnailData
+    }
+
     func release(tag: CacheTag) {
         guard let identifiers = tagBindings[tag] else { return }
         for identifier in identifiers {
             metadataCache.removeValue(forKey: identifier)
             thumbnailCache.removeValue(forKey: identifier)
+            thumbnailDataCache.removeValue(forKey: identifier)
         }
         tagBindings.removeValue(forKey: tag)
+    }
+
+    func clear() {
+        metadataCache.removeAll()
+        thumbnailCache.removeAll()
+        thumbnailDataCache.removeAll()
+        tagBindings.removeAll()
     }
 }

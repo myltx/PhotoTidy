@@ -72,11 +72,11 @@ private extension CarouselReviewView {
                 let translation = value.translation
                 if abs(translation.height) > abs(translation.width),
                    translation.height < -80 {
-                    handleAction(.skip)
+                    handleAction(.skip, metadata: metadata)
                 } else if translation.width < -80 {
-                    handleAction(.delete)
+                    handleAction(.delete, metadata: metadata)
                 } else if translation.width > 80 {
-                    handleAction(.keep)
+                    handleAction(.keep, metadata: metadata)
                 } else {
                     withAnimation {
                         dragOffset = .zero
@@ -85,7 +85,8 @@ private extension CarouselReviewView {
             }
     }
 
-    func handleAction(_ action: CardAction) {
+    func handleAction(_ action: CardAction, metadata: PhotoAssetMetadata) {
+        commitDecision(for: metadata, action: action)
         lastAction = action
         withAnimation {
             showActionFeedback = true
@@ -96,6 +97,18 @@ private extension CarouselReviewView {
             }
         }
         advanceToNextItem()
+    }
+
+    func commitDecision(for metadata: PhotoAssetMetadata, action: CardAction) {
+        let id = metadata.id
+        switch action {
+        case .skip:
+            PhotoStoreFacade.shared.applyDecision(assetIds: [id], newState: .skipped)
+        case .delete:
+            PhotoStoreFacade.shared.applyDecision(assetIds: [id], newState: .pendingDeletion)
+        case .keep:
+            PhotoStoreFacade.shared.applyDecision(assetIds: [id], newState: .clean)
+        }
     }
 
     func advanceToNextItem() {

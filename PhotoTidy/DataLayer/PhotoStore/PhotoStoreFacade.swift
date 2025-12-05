@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import UIKit
 
 @MainActor
 final class PhotoStoreFacade: ObservableObject {
@@ -76,6 +77,65 @@ final class PhotoStoreFacade: ObservableObject {
         let log = await store.prefetchLog()
         await MainActor.run {
             self.prefetchLog = log
+        }
+    }
+
+    func thumbnailImage(for asset: PhotoAssetMetadata, targetSize: CGSize = CGSize(width: 600, height: 600)) async -> UIImage? {
+        guard let data = await store.thumbnailData(for: asset, targetSize: targetSize) else {
+            return nil
+        }
+        return UIImage(data: data)
+    }
+
+    func applyDecision(assetIds: [String], newState: PhotoDecisionState) {
+        guard !assetIds.isEmpty else { return }
+        Task {
+            let updatedStates = await store.applyDecision(ids: assetIds, state: newState)
+            let dashboard = await store.dashboardSnapshot()
+            let timeline = await store.timelineBuckets()
+            let months = await store.availableMonths()
+            await MainActor.run {
+                for (intent, state) in updatedStates {
+                    self.feeds[intent] = state
+                }
+                self.dashboard = dashboard
+                self.timeline = timeline
+                self.availableMonths = months
+            }
+        }
+    }
+
+    func removeAssets(assetIds: [String]) {
+        guard !assetIds.isEmpty else { return }
+        Task {
+            let updatedStates = await store.removeAssets(ids: assetIds)
+            let dashboard = await store.dashboardSnapshot()
+            let timeline = await store.timelineBuckets()
+            let months = await store.availableMonths()
+            await MainActor.run {
+                for (intent, state) in updatedStates {
+                    self.feeds[intent] = state
+                }
+                self.dashboard = dashboard
+                self.timeline = timeline
+                self.availableMonths = months
+            }
+        }
+    }
+
+    func clearAllCaches() {
+        Task {
+            let intents = Array(self.feeds.keys)
+            await MainActor.run {
+                intents.forEach { intent in
+                    self.feeds[intent] = PhotoFeedState(intent: intent, items: [], cursor: nil, status: .loading)
+                }
+            }
+            await store.clearAndReload()
+            await bootstrap()
+            for intent in intents {
+                await bootstrapFeed(intent: intent)
+            }
         }
     }
 

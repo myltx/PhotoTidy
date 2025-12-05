@@ -86,8 +86,10 @@ private struct RankedFeedSection: View {
         guard let id = assetId(from: item) else { return }
         if selectedAssetIds.contains(id) {
             selectedAssetIds.remove(id)
+            PhotoStoreFacade.shared.applyDecision(assetIds: [id], newState: .clean)
         } else {
             selectedAssetIds.insert(id)
+            PhotoStoreFacade.shared.applyDecision(assetIds: [id], newState: .pendingDeletion)
         }
     }
 }
