@@ -7,13 +7,20 @@ struct AssetPreviewView: View {
     let metadata: PhotoAssetMetadata
     let cornerRadius: CGFloat
     let showOverlay: Bool
+    let contentMode: ContentMode
 
     @State private var uiImage: UIImage?
 
-    init(metadata: PhotoAssetMetadata, cornerRadius: CGFloat = 24, showOverlay: Bool = true) {
+    init(
+        metadata: PhotoAssetMetadata,
+        cornerRadius: CGFloat = 24,
+        showOverlay: Bool = true,
+        contentMode: ContentMode = .fill
+    ) {
         self.metadata = metadata
         self.cornerRadius = cornerRadius
         self.showOverlay = showOverlay
+        self.contentMode = contentMode
     }
 
     var body: some View {
@@ -21,7 +28,7 @@ struct AssetPreviewView: View {
             if let uiImage {
                 Image(uiImage: uiImage)
                     .resizable()
-                    .scaledToFill()
+                    .aspectRatio(contentMode: contentMode)
             } else {
                 placeholder
             }

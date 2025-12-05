@@ -9,42 +9,60 @@ struct MediaContentView: View {
     let metadata: PhotoAssetMetadata
 
     @State private var livePhoto: PHLivePhoto?
-    @State private var livePlayTrigger = 0
-    @State private var queuePlayer: AVQueuePlayer?
-    @State private var playerLooper: AVPlayerLooper?
+    @State private var avPlayer: AVPlayer?
     @State private var gifData: Data?
+    @State private var liveRequestID: PHImageRequestID?
+    @State private var videoRequestID: PHImageRequestID?
+    @State private var gifRequestID: PHImageRequestID?
 
     var body: some View {
-        content
-            .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        GeometryReader { proxy in
+            let size = targetSize(for: proxy.size)
+            ZStack {
+                Color.clear
+                mediaSurface
+                    .frame(width: size.width, height: size.height)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .onAppear { loadMediaIfNeeded() }
+            .onDisappear { cancelOngoingRequests() }
             .onChange(of: metadata.id) { _ in resetCaches(); loadMediaIfNeeded() }
+        }
+        .frame(height: 600)
     }
 }
 
 private extension MediaContentView {
+    var mediaSurface: some View {
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black.opacity(0.85))
+            .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+            .overlay(alignment: .center) {
+                if isWaitingForStageThree {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(.white)
+                        .shadow(color: .black.opacity(0.4), radius: 8)
+                        .allowsHitTesting(false)
+                }
+            }
+    }
+
     @ViewBuilder
     var content: some View {
         switch metadata.mediaType {
         case .photo:
-            AssetPreviewView(metadata: metadata, cornerRadius: 32, showOverlay: false)
+            AssetPreviewView(metadata: metadata, cornerRadius: 32, showOverlay: false, contentMode: .fit)
         case .live:
             if let livePhoto {
-                LivePhotoPlayerView(livePhoto: livePhoto, playTrigger: livePlayTrigger)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        livePlayTrigger += 1
-                    }
+                LivePhotoPlayerView(livePhoto: livePhoto)
             } else {
                 placeholder
             }
         case .video:
-            if let queuePlayer {
-                VideoPlayer(player: queuePlayer)
-                    .onAppear {
-                        queuePlayer.isMuted = true
-                        queuePlayer.play()
-                    }
+            if let avPlayer {
+                PhotosVideoPlayerView(player: avPlayer)
             } else {
                 placeholder
             }
@@ -58,10 +76,7 @@ private extension MediaContentView {
     }
 
     var placeholder: some View {
-        AssetPreviewView(metadata: metadata, cornerRadius: 32, showOverlay: false)
-            .overlay {
-                ProgressView()
-            }
+        AssetPreviewView(metadata: metadata, cornerRadius: 32, showOverlay: false, contentMode: .fit)
     }
 
     func loadMediaIfNeeded() {
@@ -79,83 +94,193 @@ private extension MediaContentView {
     }
 
     func resetCaches() {
+        cancelOngoingRequests()
         livePhoto = nil
-        queuePlayer = nil
-        playerLooper = nil
+        avPlayer = nil
         gifData = nil
     }
 
     func loadLivePhoto(asset: PHAsset) {
+        cancelLivePhotoRequest()
         let options = PHLivePhotoRequestOptions()
         options.deliveryMode = .highQualityFormat
         options.isNetworkAccessAllowed = true
-        PHImageManager.default().requestLivePhoto(for: asset, targetSize: CGSize(width: 1600, height: 1600), contentMode: .aspectFill, options: options) { livePhoto, _ in
+        let requestID = PHImageManager.default().requestLivePhoto(
+            for: asset,
+            targetSize: CGSize(width: 1600, height: 1600),
+            contentMode: .aspectFill,
+            options: options
+        ) { livePhoto, _ in
             DispatchQueue.main.async {
                 self.livePhoto = livePhoto
+                self.liveRequestID = nil
             }
         }
+        liveRequestID = requestID
     }
 
     func loadVideo(asset: PHAsset) {
+        cancelVideoRequest()
         let options = PHVideoRequestOptions()
         options.deliveryMode = .highQualityFormat
         options.isNetworkAccessAllowed = true
-        PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, _, _ in
-            guard let avAsset else { return }
-            let playerItem = AVPlayerItem(asset: avAsset)
-            let queuePlayer = AVQueuePlayer()
-            let looper = AVPlayerLooper(player: queuePlayer, templateItem: playerItem)
+        let requestID = PHImageManager.default().requestPlayerItem(forVideo: asset, options: options) { playerItem, _ in
             DispatchQueue.main.async {
-                self.queuePlayer = queuePlayer
-                self.playerLooper = looper
-                queuePlayer.play()
+                if let playerItem {
+                    let player = AVPlayer(playerItem: playerItem)
+                    player.actionAtItemEnd = .pause
+                    player.allowsExternalPlayback = false
+                    self.avPlayer = player
+                } else {
+                    self.avPlayer = nil
+                }
+                self.videoRequestID = nil
             }
         }
+        videoRequestID = requestID
     }
 
     func loadGIF(asset: PHAsset) {
+        cancelGIFRequest()
         let options = PHImageRequestOptions()
         options.deliveryMode = .highQualityFormat
         options.isNetworkAccessAllowed = true
-        PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, uti, _, _ in
-            guard let data else { return }
-            if let uti,
-               let type = UTType(uti),
-               type.conforms(to: .gif) {
-                DispatchQueue.main.async {
-                    self.gifData = data
+        let requestID = PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, uti, _, _ in
+            DispatchQueue.main.async {
+                defer { self.gifRequestID = nil }
+                guard let data else {
+                    self.gifData = nil
+                    return
                 }
-            } else {
-                DispatchQueue.main.async {
+                if let uti,
+                   let type = UTType(uti),
+                   type.conforms(to: .gif) {
+                    self.gifData = data
+                } else {
                     self.gifData = data
                 }
             }
         }
+        gifRequestID = requestID
+    }
+
+    var isWaitingForStageThree: Bool {
+        switch metadata.mediaType {
+        case .live:
+            return livePhoto == nil && liveRequestID != nil
+        case .video:
+            return avPlayer == nil && videoRequestID != nil
+        case .gif:
+            return gifData == nil && gifRequestID != nil
+        case .photo:
+            return false
+        }
+    }
+
+    func cancelOngoingRequests() {
+        cancelLivePhotoRequest()
+        cancelVideoRequest()
+        cancelGIFRequest()
+    }
+
+    func cancelLivePhotoRequest() {
+        if let id = liveRequestID {
+            PHImageManager.default().cancelImageRequest(id)
+            liveRequestID = nil
+        }
+    }
+
+    func cancelVideoRequest() {
+        if let id = videoRequestID {
+            PHImageManager.default().cancelImageRequest(id)
+            videoRequestID = nil
+        }
+    }
+
+    func cancelGIFRequest() {
+        if let id = gifRequestID {
+            PHImageManager.default().cancelImageRequest(id)
+            gifRequestID = nil
+        }
+    }
+
+    func targetSize(for container: CGSize) -> CGSize {
+        let horizontalPadding: CGFloat = 10 // 左右各 5pt
+        let verticalPadding: CGFloat = 0
+        let maxWidth = max(container.width - horizontalPadding, 0)
+        let maxHeight = max(container.height - verticalPadding, 0)
+        let aspect = max(CGFloat(metadata.aspectRatio), 0.1)
+        var width = maxWidth
+        var height = width / aspect
+        if height > maxHeight, maxHeight > 0 {
+            height = maxHeight
+            width = height * aspect
+        }
+        return CGSize(width: max(width, 1), height: max(height, 1))
     }
 }
 
 private struct LivePhotoPlayerView: UIViewRepresentable {
     let livePhoto: PHLivePhoto
-    let playTrigger: Int
 
     func makeUIView(context: Context) -> PHLivePhotoView {
-        PHLivePhotoView()
+        let view = PHLivePhotoView()
+        view.contentMode = .scaleAspectFit
+        view.isMuted = false
+        view.isUserInteractionEnabled = true
+        let longPress = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleLongPress(_:)))
+        longPress.minimumPressDuration = 0.08
+        longPress.cancelsTouchesInView = false
+        view.addGestureRecognizer(longPress)
+        context.coordinator.photoView = view
+        return view
     }
 
     func updateUIView(_ uiView: PHLivePhotoView, context: Context) {
         uiView.livePhoto = livePhoto
-        if context.coordinator.playCounter != playTrigger {
-            uiView.startPlayback(with: .full)
-            context.coordinator.playCounter = playTrigger
-        }
     }
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
 
-    final class Coordinator {
-        var playCounter: Int = 0
+    final class Coordinator: NSObject {
+        weak var photoView: PHLivePhotoView?
+
+        @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+            guard let view = photoView else { return }
+            switch gesture.state {
+            case .began:
+                view.startPlayback(with: .full)
+            case .ended, .cancelled, .failed:
+                view.stopPlayback()
+            default:
+                break
+            }
+        }
+    }
+}
+
+private struct PhotosVideoPlayerView: UIViewControllerRepresentable {
+    let player: AVPlayer
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.player = player
+        controller.showsPlaybackControls = true
+        controller.entersFullScreenWhenPlaybackBegins = false
+        controller.exitsFullScreenWhenPlaybackEnds = false
+        controller.allowsPictureInPicturePlayback = false
+        controller.videoGravity = .resizeAspect
+        controller.player?.play()
+        return controller
+    }
+
+    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
+        if controller.player !== player {
+            controller.player = player
+            controller.player?.play()
+        }
     }
 }
 

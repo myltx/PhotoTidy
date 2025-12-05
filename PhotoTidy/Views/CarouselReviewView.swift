@@ -314,6 +314,44 @@ private struct ActionIndicatorView: View {
     }
 }
 
+private struct ActionToolbar: View {
+    var onAction: (CardAction) -> Void
+
+    var body: some View {
+        HStack(spacing: 40) {
+            ToolbarButton(icon: "arrow.up", title: "跳过") {
+                onAction(.skip)
+            }
+            ToolbarButton(icon: "trash", title: "删除") {
+                onAction(.delete)
+            }
+            ToolbarButton(icon: "checkmark.circle", title: "保留") {
+                onAction(.keep)
+            }
+        }
+        .padding(.vertical, 10)
+    }
+
+    private struct ToolbarButton: View {
+        let icon: String
+        let title: String
+        let action: () -> Void
+
+        var body: some View {
+            Button(action: action) {
+                VStack(spacing: 6) {
+                    Image(systemName: icon)
+                        .font(.title2)
+                    Text(title)
+                        .font(.caption)
+                }
+                .foregroundStyle(.white)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
 private struct MediaTypeBadge: View {
     let type: PhotoAssetMetadata.MediaType
 
