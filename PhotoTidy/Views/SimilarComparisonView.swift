@@ -6,9 +6,13 @@ struct SimilarComparisonView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var groups: [SimilarGroup] = []
+    @State private var displayedGroups: [SimilarGroup] = []
+    @State private var allGroups: [SimilarGroup] = []
     @State private var selections: [Int: Set<String>] = [:]
     @State private var previewItem: PhotoItem?
     @State private var pendingRecomputeWorkItem: DispatchWorkItem?
+    @State private var batchSize: Int = 10
+    @State private var nextGroupIndex: Int = 0
 
     private let chipFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -28,19 +32,32 @@ struct SimilarComparisonView: View {
                     onRightAction: recomputeGroups
                 )
 
-                if groups.isEmpty {
+                if allGroups.isEmpty && displayedGroups.isEmpty {
                     emptyState
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding()
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 18, pinnedViews: []) {
-                            ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
+                            ForEach(Array(displayedGroups.enumerated()), id: \.element.id) { index, group in
                                 groupCard(for: group, index: index)
+                            }
+                            if nextGroupIndex < allGroups.count {
+                                loadMoreFooter
+                                    .onAppear(perform: loadNextBatchIfNeeded)
                             }
                         }
                         .padding(.horizontal, 20)
                         .padding(.vertical, 16)
+                        .overlay(
+                            Group {
+                                if displayedGroups.isEmpty {
+                                    ProgressView("正在加载分组…")
+                                        .progressViewStyle(CircularProgressViewStyle(tint: Color("brand-start")))
+                                        .padding()
+                                }
+                            }
+                        )
                     }
                 }
             }
@@ -241,10 +258,15 @@ struct SimilarComparisonView: View {
 
     private func removeGroup(_ id: Int) {
         withAnimation {
-            groups.removeAll { $0.id == id }
+            displayedGroups.removeAll { $0.id == id }
+            allGroups.removeAll { $0.id == id }
+            groups = allGroups
             selections.removeValue(forKey: id)
         }
-        if groups.isEmpty {
+        if displayedGroups.isEmpty {
+            loadNextBatchIfNeeded()
+        }
+        if displayedGroups.isEmpty && allGroups.isEmpty {
             scheduleRecomputeGroups(after: 0.4)
         }
     }
@@ -290,8 +312,11 @@ struct SimilarComparisonView: View {
             }
         }
 
-        groups = nextGroups.sorted { $0.latestDate > $1.latestDate }
+        allGroups = nextGroups.sorted { $0.latestDate > $1.latestDate }
+        groups = allGroups
         selections = nextSelections
+        nextGroupIndex = 0
+        displayInitialBatch()
     }
 
     private func scheduleRecomputeGroups(after delay: TimeInterval = 0.35) {
@@ -320,6 +345,32 @@ struct SimilarComparisonView: View {
             }
         }
         return bestIndex
+    }
+
+    private func displayInitialBatch() {
+        displayedGroups = []
+        loadNextBatchIfNeeded()
+    }
+
+    private func loadNextBatchIfNeeded() {
+        guard nextGroupIndex < groups.count else { return }
+        let upper = min(nextGroupIndex + batchSize, groups.count)
+        let batch = groups[nextGroupIndex..<upper]
+        withAnimation {
+            displayedGroups.append(contentsOf: batch)
+        }
+        nextGroupIndex = upper
+    }
+
+    private var loadMoreFooter: some View {
+        HStack(spacing: 12) {
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle(tint: Color("brand-start")))
+            Text("加载更多分组…")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.secondary)
+        }
+        .padding(.vertical, 12)
     }
 }
 
