@@ -705,11 +705,10 @@ private var hasScheduledInitialAssetLoad = false
         let itemsSnapshot = self.items
         guard !itemsSnapshot.isEmpty else {
             Task { @MainActor [weak self] in
-                self?.similarGroupSnapshots = []
-            }
-            Task { [weak self] in
                 guard let self else { return }
-                await self.similarGroupCache.replace(with: [])
+                if self.similarGroupSnapshots.isEmpty { return }
+                self.similarGroupSnapshots = []
+                Task.detached { await self.similarGroupCache.replace(with: []) }
             }
             return
         }
@@ -745,12 +744,11 @@ private var hasScheduledInitialAssetLoad = false
 
         let sortedSnapshots = snapshots.sorted { $0.latestDate > $1.latestDate }
 
-        Task { [weak self] in
-            guard let self else { return }
-            await self.similarGroupCache.replace(with: sortedSnapshots)
-        }
         Task { @MainActor [weak self] in
-            self?.similarGroupSnapshots = sortedSnapshots
+            guard let self else { return }
+            if self.similarGroupSnapshots == sortedSnapshots { return }
+            self.similarGroupSnapshots = sortedSnapshots
+            Task.detached { await self.similarGroupCache.replace(with: sortedSnapshots) }
         }
     }
 

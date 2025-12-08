@@ -66,7 +66,8 @@ struct SimilarComparisonView: View {
             scheduleRecomputeGroups()
         }
         .onChange(of: viewModel.items) { _ in
-            scheduleRecomputeGroups()
+            guard shouldRefreshForItems() else { return }
+            scheduleRecomputeGroups(after: 0.2)
         }
         .fullScreenCover(item: $previewItem) { item in
             FullScreenPreviewView(item: item, viewModel: viewModel)
@@ -376,6 +377,17 @@ struct SimilarComparisonView: View {
                 .foregroundColor(.secondary)
         }
         .padding(.vertical, 12)
+    }
+
+    private func shouldRefreshForItems() -> Bool {
+        guard !viewModel.similarGroupSnapshots.isEmpty else { return false }
+        let neededIds = Set(viewModel.similarGroupSnapshots.flatMap(\.assetIds))
+        guard !neededIds.isEmpty else { return false }
+        let available = Set(viewModel.items.map(\.id))
+        if !neededIds.isSubset(of: available) {
+            return true
+        }
+        return displayedGroups.isEmpty && !neededIds.isEmpty
     }
 }
 
