@@ -372,11 +372,18 @@ struct SimilarComparisonView: View {
     /// 重新根据最新数据计算分组，并修正当前索引和选中项
     private func recomputeGroups() {
         var dict: [Int: [PhotoItem]] = [:]
+        var groupMembership: [Int: Set<String>] = [:]
         for item in viewModel.items {
             guard let gid = item.similarGroupId else { continue }
+            var membership = groupMembership[gid] ?? []
+            if membership.contains(item.id) { continue }
+            membership.insert(item.id)
+            groupMembership[gid] = membership
             dict[gid, default: []].append(item)
         }
-        let values = Array(dict.values)
+        let values = dict.values.map { group -> [PhotoItem] in
+            group.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
+        }
         let sorted = values.sorted { lhs, rhs in
             let lDate = lhs.first?.creationDate ?? .distantPast
             let rDate = rhs.first?.creationDate ?? .distantPast
