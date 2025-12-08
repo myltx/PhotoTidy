@@ -3,6 +3,7 @@ import AVKit
 import Photos
 
 struct CarouselReviewView: View {
+    @ObservedObject var cleanupViewModel: PhotoCleanupViewModel
     @StateObject private var viewModel = PhotoFeedViewModel(intent: .sequential(scope: .all))
     @State private var currentIndex: Int = 0
     @State private var dragOffset: CGSize = .zero
@@ -13,6 +14,19 @@ struct CarouselReviewView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
+                HStack {
+                    Button {
+                        cleanupViewModel.dismissCleaner()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.primary)
+                            .padding(10)
+                            .background(Color(.systemBackground), in: Circle())
+                    }
+                    Spacer()
+                }
+
                 if let metadata = currentMetadata {
                     Text(metadata.fileName)
                         .font(.title3.bold())
@@ -21,7 +35,7 @@ struct CarouselReviewView: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                     AlbumFilterView(selectedAlbum: $selectedAlbum, albums: availableAlbums)
                     MediaCard(metadata: metadata, dragOffset: $dragOffset, pendingAction: pendingAction)
-                        .gesture(cardGesture(for: metadata))
+                        .simultaneousGesture(cardGesture(for: metadata))
                         .animation(.spring(response: 0.35, dampingFraction: 0.78), value: dragOffset)
                         .overlay(alignment: .top) {
                             if showActionFeedback, let lastAction {
@@ -241,6 +255,7 @@ private struct MediaCard: View {
                             .background(.ultraThinMaterial, in: Capsule())
                     }
                     .padding()
+                    .allowsHitTesting(false)
                 }
         }
         .overlay(alignment: .topLeading) {
@@ -251,11 +266,13 @@ private struct MediaCard: View {
                 }
             }
             .padding()
+            .allowsHitTesting(false)
         }
         .overlay(alignment: .topTrailing) {
             if let pendingAction, pendingAction != .keep {
                 ActionIndicatorView(action: pendingAction)
                     .padding()
+                    .allowsHitTesting(false)
             }
         }
         .frame(maxWidth: .infinity)

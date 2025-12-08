@@ -1,201 +1,622 @@
 import SwiftUI
+import UIKit
 
+/// 首页 Dashboard，按高保真设计稿实现：
+/// - 顶部标题 + 存储提示
+/// - 中间大卡片「全相册整理」
+/// - 下方四个「智能整理」分类入口
 struct DashboardView: View {
-    @StateObject private var viewModel = DashboardViewModel()
+    @ObservedObject var viewModel: PhotoCleanupViewModel
+    var onShowTrash: (() -> Void)? = nil
+    @State private var showingResumeResetAlert = false
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    SectionHeader(title: "存储概览", subtitle: "手机容量与可释放空间")
-                    storageOverview
-                    SectionHeader(title: "待处理区域", subtitle: "待删除与待确认的数量")
-                    pendingSection
-                    SectionHeader(title: "分类统计", subtitle: "常见清理类别实时数量")
-                    statGrid
+            ZStack {
+                blurredBackground
+
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        Section {
+                            VStack(alignment: .leading, spacing: 24) {
+                                headerSection
+                                heroCleanerCard
+                                smartCleanupTitle
+                                smartCleanupGrid
+                                Spacer(minLength: 40)
+                            }
+                            .padding(.horizontal, 24)
+                            .padding(.top, 16)
+                            .padding(.bottom, 32)
+                        } header: {
+                            statusBarPlaceholder
+                                .padding(.horizontal, 20)
+                                .padding(.top, 20)
+                                .padding(.bottom, 10)
+                                .background(.thinMaterial)
+                        }
+                    }
                 }
-                .padding(20)
+                .ignoresSafeArea(edges: .top)
             }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("清理仪表盘")
+            .navigationBarHidden(true)
         }
-    }
-
-    private var storageOverview: some View {
-        StorageOverviewCard(storage: viewModel.snapshot.storageUsage)
-    }
-
-    private var pendingSection: some View {
-        HStack(spacing: 12) {
-            PendingMetricCard(
-                title: "待删区",
-                value: viewModel.snapshot.pendingDeletion,
-                icon: "trash",
-                gradient: ["#F87171", "#EF4444"]
-            )
-            PendingMetricCard(
-                title: "待确认",
-                value: viewModel.snapshot.skipped,
-                icon: "rectangle.dashed",
-                gradient: ["#FCD34D", "#FBBF24"]
-            )
-        }
-    }
-
-    private var statGrid: some View {
-        let stats = [
-            DashboardStat(label: "总数", value: viewModel.snapshot.value(for: "总数") ?? 0, colors: ["#6366F1", "#8B5CF6"]),
-            DashboardStat(label: "大文件", value: viewModel.snapshot.value(for: "大文件") ?? 0, colors: ["#F97316", "#FB923C"]),
-            DashboardStat(label: "相似图片", value: viewModel.snapshot.value(for: "相似") ?? 0, colors: ["#EC4899", "#F472B6"]),
-            DashboardStat(label: "文档/截图", value: documentScreenshotTotal, colors: ["#0EA5E9", "#38BDF8"]),
-            DashboardStat(label: "模糊照片", value: viewModel.snapshot.value(for: "模糊") ?? 0, colors: ["#10B981", "#34D399"])
-        ]
-        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 2), spacing: 12) {
-            ForEach(stats) { stat in
-                DashboardMetricCard(stat: stat)
+        .alert("清除全相册整理进度？", isPresented: $showingResumeResetAlert) {
+            Button("取消", role: .cancel) {}
+            Button("重置", role: .destructive) {
+                viewModel.resetSmartCleanupProgressOnly()
             }
+        } message: {
+            Text("仅重置首页全相册整理进度，时光机（月度）记录不受影响。")
         }
     }
-
-    private var documentScreenshotTotal: Int {
-        let docs = viewModel.snapshot.value(for: "文档") ?? 0
-        let shots = viewModel.snapshot.value(for: "截图") ?? 0
-        return docs + shots
-    }
-
 }
 
-private struct StorageOverviewCard: View {
-    let storage: DeviceStorageUsage
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+// MARK: - Sections
+private extension DashboardView {
+    var headerSection: some View {
+        VStack(spacing: 18) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("手机存储")
-                        .font(.headline)
-                        .foregroundColor(.white)
-                    Text(storage.formattedTotal)
-                        .font(.title2.bold())
-                        .foregroundColor(.white)
+                HStack(spacing: 12) {
+                    Image("duck")
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 52, height: 52)
+                        .background(cardBackgroundColor)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(cardBackgroundColor, lineWidth: 3))
+                        .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(greetingText)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+                        Text("PhotoTidy")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(.primary)
+                    }
                 }
+
                 Spacer()
-                Gauge(value: usageRatio) {
-                    Text("")
-                } currentValueLabel: {
-                    Text(String(format: "%.0f%%", usageRatio * 100))
-                        .font(.caption2)
-                        .foregroundColor(.white)
+
+                Button {
+                    onShowTrash?()
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(cardBackgroundColor)
+                            .frame(width: 46, height: 46)
+                            .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
+                        Image(systemName: "trash")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(Color("brand-start"))
+                    }
+                    .overlay(alignment: .topTrailing) {
+                        if viewModel.pendingDeletionItems.count > 0 {
+                            Text("\(min(viewModel.pendingDeletionItems.count, 99))")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Color.red)
+                                .clipShape(Capsule())
+                                .offset(x: 8, y: -8)
+                        }
+                    }
                 }
-                .gaugeStyle(.accessoryCircularCapacity)
-                .tint(Gradient(colors: [Color(hex: "#34D399"), Color(hex: "#10B981")]))
+                .buttonStyle(.plain)
+                .accessibilityLabel("打开待删区")
             }
-            Divider().overlay(Color.white.opacity(0.2))
-            HStack(spacing: 12) {
-                storageChip(title: "已使用", value: storage.formattedUsed, color: "#F97316")
-                storageChip(title: "可清理", value: storage.formattedClearable, color: "#10B981")
-                storageChip(title: "剩余", value: storage.formattedFree, color: "#6366F1")
+
+            storageSummaryCard
+        }
+    }
+
+    var heroCleanerCard: some View {
+        Group {
+            if let info = viewModel.smartCleanupResumeInfo {
+                resumeHeroCard(info: info)
+            } else {
+                startHeroCard
             }
         }
-        .padding()
-        .background(
-            LinearGradient(colors: [Color(hex: "#1F1C2C"), Color(hex: "#928DAB")],
-                           startPoint: .topLeading,
-                           endPoint: .bottomTrailing)
+    }
+
+    private var startHeroCard: some View {
+        SmartCleanupStartCard(viewModel: viewModel)
+    }
+
+    private func resumeHeroCard(info: PhotoCleanupViewModel.SmartCleanupResumeInfo) -> some View {
+        SmartCleanupHeroCard(
+            viewModel: viewModel,
+            info: info,
+            isLoading: viewModel.isLoading,
+            showReset: FeatureToggles.showCleanupResetControls,
+            onReset: { showingResumeResetAlert = true }
         )
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
-    private var usageRatio: Double {
-        guard storage.totalBytes > 0 else { return 0 }
-        return Double(storage.usedBytes) / Double(storage.totalBytes)
+    var smartCleanupTitle: some View {
+        Text("智能整理")
+            .font(.subheadline).bold()
+            .foregroundColor(.primary)
     }
 
-    private func storageChip(title: String, value: String, color: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.caption)
-                .foregroundColor(.white.opacity(0.8))
-            Text(value)
-                .font(.headline)
-                .foregroundColor(.white)
+    var smartCleanupGrid: some View {
+        LazyVGrid(
+            columns: [
+                GridItem(.flexible(), spacing: 12),
+                GridItem(.flexible(), spacing: 12)
+            ],
+            spacing: 12
+        ) {
+            SmartTile(
+                title: "相似照片",
+                systemIcon: "rectangle.stack",
+                iconColor: .indigo,
+                action: { viewModel.showDetail(.similar) },
+                onAppear: { viewModel.preloadSampleThumbnails(for: .similar, target: .dashboardCard) }
+            )
+
+            SmartTile(
+                title: "模糊照片",
+                systemIcon: "drop.triangle",
+                iconColor: .orange,
+                action: { viewModel.showDetail(.blurry) },
+                onAppear: { viewModel.preloadSampleThumbnails(for: .blurry, target: .dashboardCard) }
+            )
+
+            SmartTile(
+                title: "截图文档",
+                systemIcon: "doc.richtext",
+                iconColor: .blue,
+                action: { viewModel.showDetail(.screenshots) },
+                onAppear: { viewModel.preloadSampleThumbnails(for: .screenshots, target: .dashboardCard) }
+            )
+
+            SmartTile(
+                title: "大文件",
+                systemIcon: "film",
+                iconColor: .green,
+                action: { viewModel.showDetail(.largeFiles) },
+                onAppear: { viewModel.preloadSampleThumbnails(for: .largeFiles, target: .tinderCard) }
+            )
         }
-        .padding(8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(hex: color).opacity(0.3))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.bottom, 40)
     }
-}
 
-private struct SectionHeader: View {
-    let title: String
-    let subtitle: String
+    private var storageSummaryCard: some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .lastTextBaseline) {
+                    Text("存储空间")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Text(usagePercentageText)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(Color("brand-start"))
+                }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.title3.bold())
-            Text(subtitle)
-                .font(.caption)
-                .foregroundColor(.secondary)
+                storageProgressBar
+
+                VStack(alignment: .leading, spacing: 4) {
+                    if let detail = storageUsageDetailText {
+                        Text(detail)
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
+                    Text(storageSuggestionText)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(Color("brand-start"))
+                }
+
+                if let status = analysisStatusText {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .scaleEffect(0.5)
+                        Text(status)
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            ZStack {
+                Circle()
+                    .fill(Color(UIColor.systemGray6))
+                    .frame(width: 52, height: 52)
+                Image(systemName: "internaldrive")
+                    .font(.system(size: 22))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(cardBackgroundColor)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .stroke(Color.black.opacity(0.04), lineWidth: 1)
+                )
+        )
+        .shadow(color: .black.opacity(0.04), radius: 8, y: 4)
+    }
+
+    private var storageProgressBar: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color(UIColor.systemGray5))
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color("brand-start"), Color("brand-end")],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: max(CGFloat(usageProgress) * proxy.size.width, 8))
+            }
+        }
+        .frame(height: 10)
+    }
+
+    private var usagePercentageText: String {
+        if let percent = viewModel.deviceStorageUsage.formattedPercentageText {
+            return "已用 \(percent)"
+        }
+        return "正在计算…"
+    }
+
+    private var storageUsageDetailText: String? {
+        viewModel.deviceStorageUsage.formattedUsageDetailText
+    }
+
+    private var usageProgress: Double {
+        min(max(viewModel.deviceStorageUsage.usagePercentage, 0), 1)
+    }
+
+    private var storageSuggestionText: String {
+        let bytes = viewModel.pendingDeletionTotalSize
+        if bytes > 0 {
+            return "建议清理 \(bytes.fileSizeDescription)"
+        }
+        return "定期清理可保持充足空间"
+    }
+
+    private var greetingText: String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        switch hour {
+        case 5..<12: return "早上好"
+        case 12..<18: return "下午好"
+        case 18..<23: return "晚上好"
+        default: return "夜深了"
         }
     }
-}
 
-private struct PendingMetricCard: View {
-    let title: String
-    let value: Int
-    let icon: String
-    let gradient: [String]
+    private var analysisStatusText: String? {
+        if viewModel.isLoading {
+            return "正在加载相册…"
+        }
+        return nil
+    }
 
-    var body: some View {
+    private var cardBackgroundColor: Color {
+        Color(UIColor.systemBackground)
+    }
+
+    var blurredBackground: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color.clear)
+                .overlay(
+                    Image("all_album_bg")
+                        .resizable()
+                        .scaledToFill()
+                )
+                .clipped()
+                .opacity(0.2)
+                .blur(radius: 16)
+                .ignoresSafeArea()
+
+            LinearGradient(
+                colors: [
+                    Color(UIColor.systemGray6).opacity(0.95),
+                    Color(UIColor.systemBackground).opacity(0.85)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        }
+    }
+
+    var statusBarPlaceholder: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.headline)
-                    .foregroundColor(.white)
-                Text("\(value)")
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-            }
             Spacer()
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundColor(.white.opacity(0.8))
+            Text("首页")
+                .font(.system(size: 28, weight: .bold))
+                .foregroundColor(.clear)
+            Spacer()
         }
-        .padding()
-        .frame(maxWidth: .infinity)
-        .background(
-            LinearGradient(colors: gradient.map { Color(hex: $0) }, startPoint: .topLeading, endPoint: .bottomTrailing)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 
-private struct DashboardStat: Identifiable {
-    let id = UUID()
-    let label: String
-    let value: Int
-    let colors: [String]
-}
-
-private struct DashboardMetricCard: View {
-    let stat: DashboardStat
+// MARK: - Smart Tile
+private struct SmartTile: View {
+    let title: String
+    let systemIcon: String
+    let iconColor: Color
+    let action: () -> Void
+    var onAppear: (() -> Void)? = nil
+    @State private var hasAppeared = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(stat.label)
-                .font(.headline)
-                .foregroundColor(.white.opacity(0.9))
-            Text("\(stat.value)")
-                .font(.system(size: 28, weight: .heavy, design: .rounded))
-                .foregroundColor(.white)
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                Image(systemName: systemIcon)
+                    .font(.system(size: 24))
+                    .foregroundColor(iconColor)
+                    .padding(.bottom, 4)
+                Text(title)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.primary)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(UIColor.secondarySystemBackground))
+            .cornerRadius(20)
+            .shadow(color: Color.black.opacity(0.05), radius: 4, y: 2)
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(Color(UIColor.systemGray4), lineWidth: 1)
+            )
         }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            LinearGradient(colors: stat.colors.map { Color(hex: $0) }, startPoint: .topLeading, endPoint: .bottomTrailing)
+        .buttonStyle(.plain)
+        .onAppear {
+            guard !hasAppeared else { return }
+            hasAppeared = true
+            onAppear?()
+        }
+    }
+}
+
+private struct SmartCleanupHeroCard: View {
+    @ObservedObject var viewModel: PhotoCleanupViewModel
+    let info: PhotoCleanupViewModel.SmartCleanupResumeInfo
+    let isLoading: Bool
+    let showReset: Bool
+    let onReset: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            Image("all_album_bg")
+                .resizable()
+                .scaledToFill()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                .overlay(Color.black.opacity(0.35))
+
+            LinearGradient(
+                colors: [Color("brand-start").opacity(0.85), Color.clear],
+                startPoint: .bottom,
+                endPoint: .top
+            )
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    AnimatedStatusBadge(label: "进行中")
+                    Spacer()
+                    PendingBadge(count: info.pendingDeletionCount, icon: "trash")
+                }
+
+                Text("继续整理")
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundColor(.white)
+                    .tracking(-0.5)
+
+                if let dateText = formattedResumeDate(info.anchorAsset?.captureDate) {
+                    Label("上次停留：\(dateText)", systemImage: "clock.arrow.circlepath")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(Color("brand-start").opacity(0.9))
+                }
+
+                Text(resumeSubtitle(count: info.pendingDeletionCount))
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.75))
+
+                HStack(spacing: 12) {
+                    Button {
+                        guard !isLoading else { return }
+                        viewModel.resumeSmartCleanup()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: isLoading ? "hourglass" : "play.fill")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(Color("brand-start"))
+                            Text(isLoading ? "准备中…" : "继续")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.black)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .shadow(color: .black.opacity(0.25), radius: 12, y: 8)
+                    }
+                    .disabled(isLoading)
+
+                    if showReset {
+                        Button(action: onReset) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                        .frame(width: 48, height: 44)
+                        .background(Color.white.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                        )
+                    }
+                }
+                .padding(.top, 4)
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 36)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 240)
+        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 32, style: .continuous)
+                .stroke(Color.white.opacity(0.15), lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: .black.opacity(0.25), radius: 22, y: 14)
+        .onTapGesture {
+            guard !isLoading else { return }
+            viewModel.showCleaner(filter: .all)
+        }
+    }
+
+    private func resumeSubtitle(count: Int) -> String {
+        count > 0 ? "待删区中有 \(count) 张，记得尽快确认删除" : "等待你的下一次整理"
+    }
+
+    private func formattedResumeDate(_ date: Date?) -> String? {
+        guard let date else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy年 M月d日"
+        return formatter.string(from: date)
+    }
+}
+
+private struct SmartCleanupStartCard: View {
+    @ObservedObject var viewModel: PhotoCleanupViewModel
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            Image("all_album_bg")
+                .resizable()
+                .scaledToFill()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                .overlay(Color.black.opacity(0.35))
+
+            LinearGradient(
+                colors: [Color.black.opacity(0.85), Color.clear],
+                startPoint: .bottom,
+                endPoint: .top
+            )
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("推荐")
+                    .font(.system(size: 11, weight: .bold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.indigo.opacity(0.9))
+                    .foregroundColor(.white)
+                    .clipShape(Capsule())
+
+                Text("全相册整理")
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundColor(.white)
+                Text("左滑删除，右滑保留")
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.8))
+
+                Button {
+                    guard !viewModel.isLoading else { return }
+                    viewModel.showCleaner(filter: .all)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: viewModel.isLoading ? "hourglass" : "play.fill")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(Color.indigo)
+                        Text(viewModel.isLoading ? "准备中…" : "开始")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.black)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .shadow(color: .black.opacity(0.2), radius: 10, y: 6)
+                }
+                .disabled(viewModel.isLoading)
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 34)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 220)
+        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 32, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.25), radius: 18, y: 12)
+        .onTapGesture {
+            guard !viewModel.isLoading else { return }
+            viewModel.showCleaner(filter: .all)
+        }
+    }
+}
+
+private struct PendingBadge: View {
+    let count: Int
+    let icon: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(Color.indigo.opacity(0.9))
+            Text(count > 0 ? "待删 \(count) 张" : "待删区为空")
+                .font(.system(size: 10, weight: .medium))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.black.opacity(0.4))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.15), lineWidth: 1)
+        )
+    }
+}
+
+private struct AnimatedStatusBadge: View {
+    let label: String
+    @State private var animate = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ZStack {
+                Circle()
+                    .fill(Color.white.opacity(0.25))
+                    .frame(width: 12, height: 12)
+                    .scaleEffect(animate ? 1.6 : 0.6)
+                    .opacity(animate ? 0 : 1)
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 8, height: 8)
+            }
+            Text(label)
+                .font(.system(size: 11, weight: .bold))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.indigo.opacity(0.9))
+        .clipShape(Capsule())
+        .onAppear {
+            withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) {
+                animate = true
+            }
+        }
     }
 }
