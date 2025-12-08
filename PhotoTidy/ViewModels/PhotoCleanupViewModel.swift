@@ -94,7 +94,7 @@ private var hasScheduledInitialAssetLoad = false
     var thirdItem: PhotoItem? { sessionItems[safe: currentIndex + 2] }
 
     var isZeroLatencyTimeMachineSession: Bool {
-        FeatureToggles.useZeroLatencyTimeMachine && activeMonthContext != nil
+        activeMonthContext != nil
     }
 
     func cachedLargeImage(for id: String) -> UIImage? {
@@ -125,25 +125,25 @@ private var hasScheduledInitialAssetLoad = false
 
     // Dashboard Stats
     var similarItemsCount: Int {
-        if FeatureToggles.enableZeroLatencyPipeline, items.isEmpty {
+        if items.isEmpty {
             return metadataSnapshot.categoryCounters.similar
         }
         return items.filter { $0.similarGroupId != nil }.count
     }
     var blurredItemsCount: Int {
-        if FeatureToggles.enableZeroLatencyPipeline, items.isEmpty {
+        if items.isEmpty {
             return metadataSnapshot.categoryCounters.blurred
         }
         return items.filter { $0.isBlurredOrShaky }.count
     }
     var screenshotItemsCount: Int {
-        if FeatureToggles.enableZeroLatencyPipeline, items.isEmpty {
+        if items.isEmpty {
             return metadataSnapshot.categoryCounters.screenshot + metadataSnapshot.categoryCounters.document
         }
         return items.filter { $0.isScreenshot || $0.isDocumentLike }.count
     }
     var largeFilesSize: Int {
-        if FeatureToggles.enableZeroLatencyPipeline, items.isEmpty {
+        if items.isEmpty {
             return metadataSnapshot.categoryCounters.largeFile * (15 * 1_024 * 1_024)
         }
         return items.filter { $0.isLargeFile }.map { $0.fileSize }.reduce(0, +)
@@ -175,9 +175,6 @@ private var hasScheduledInitialAssetLoad = false
         PHPhotoLibrary.shared().register(self)
         if authorizationStatus.isAuthorized {
             ensureMetadataBootstrap()
-            if !FeatureToggles.enableZeroLatencyPipeline || !FeatureToggles.lazyLoadPhotoSessions {
-                scheduleInitialAssetLoad()
-            }
         }
         
         NotificationCenter.default
@@ -213,23 +210,19 @@ private var hasScheduledInitialAssetLoad = false
             .sink { [weak self] snapshot in
                 guard let self else { return }
                 self.metadataSnapshot = snapshot
-                if FeatureToggles.enableZeroLatencyPipeline {
-                    self.monthAssetTotals = snapshot.monthTotalsDictionary
-                    if snapshot.deviceStorageUsage.hasValidData {
-                        self.deviceStorageUsage = snapshot.deviceStorageUsage
-                    }
+                self.monthAssetTotals = snapshot.monthTotalsDictionary
+                if snapshot.deviceStorageUsage.hasValidData {
+                    self.deviceStorageUsage = snapshot.deviceStorageUsage
                 }
             }
             .store(in: &cancellables)
     }
 
     private func ensureMetadataBootstrap() {
-        guard FeatureToggles.enableZeroLatencyPipeline else { return }
         metadataRepository.bootstrapIfNeeded()
     }
 
     private func ensureRealAssetPipeline() {
-        guard FeatureToggles.enableZeroLatencyPipeline, FeatureToggles.lazyLoadPhotoSessions else { return }
         scheduleInitialAssetLoad()
     }
     
@@ -243,9 +236,6 @@ private var hasScheduledInitialAssetLoad = false
 
             if newStatus != oldStatus && newStatus.isAuthorized {
                 self.ensureMetadataBootstrap()
-                if !FeatureToggles.enableZeroLatencyPipeline || !FeatureToggles.lazyLoadPhotoSessions {
-                    self.scheduleInitialAssetLoad()
-                }
             }
         }
     }
@@ -260,9 +250,7 @@ private var hasScheduledInitialAssetLoad = false
             self.resetPagingState()
             self.pagingLoader.reloadLibrary()
             self.photoRepository.reloadLibrary()
-            if FeatureToggles.enableZeroLatencyPipeline {
-                self.metadataRepository.refresh()
-            }
+            self.metadataRepository.refresh()
         }
     }
     
@@ -429,9 +417,6 @@ private var hasScheduledInitialAssetLoad = false
                 self.authorizationStatus = newStatus
                 if newStatus.isAuthorized {
                     self.ensureMetadataBootstrap()
-                    if !FeatureToggles.enableZeroLatencyPipeline || !FeatureToggles.lazyLoadPhotoSessions {
-                        self.scheduleInitialAssetLoad()
-                    }
                 }
             }
         }
@@ -464,28 +449,7 @@ private var hasScheduledInitialAssetLoad = false
     }
 
     func ensureAssetsPrepared() {
-        if FeatureToggles.enableZeroLatencyPipeline {
-            ensureMetadataBootstrap()
-            if !FeatureToggles.lazyLoadPhotoSessions {
-                scheduleInitialAssetLoad()
-            }
-        } else {
-            scheduleInitialAssetLoad()
-            refreshDeviceStorageUsage()
-        }
-    }
-
-    private func assets(in fetchResult: PHFetchResult<PHAsset>, year: Int, month: Int) -> [PHAsset] {
-        var matched: [PHAsset] = []
-        let calendar = Calendar.current
-        fetchResult.enumerateObjects { asset, _, _ in
-            guard let date = asset.creationDate ?? asset.modificationDate else { return }
-            let comps = calendar.dateComponents([.year, .month], from: date)
-            if comps.year == year && comps.month == month {
-                matched.append(asset)
-            }
-        }
-        return matched
+        ensureMetadataBootstrap()
     }
 
     private func startPagingLoader() {
@@ -1018,15 +982,6 @@ private var hasScheduledInitialAssetLoad = false
         }
     }
     
-    private func refreshDeviceStorageUsage() {
-        DispatchQueue.global(qos: .utility).async {
-            let usage = DeviceStorageUsage.current()
-            DispatchQueue.main.async {
-                self.deviceStorageUsage = usage
-            }
-        }
-    }
-
     // MARK: - Month Status Tracking
 
     private func rebuildMonthSession(year: Int, month: Int) {
@@ -1401,9 +1356,6 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
             }
             self?.analysisCache.pruneMissingEntries(keeping: identifiers)
         }
-        if !FeatureToggles.enableZeroLatencyPipeline {
-            rebuildMonthAssetTotals(from: fetchResult)
-        }
     }
 
     func photoLoader(_ loader: PhotoLoader, didLoadAssets assets: [PHAsset]) {
@@ -1420,66 +1372,31 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
         PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { _, _, _ in }
     }
 
-    private func rebuildMonthAssetTotals(from fetchResult: PHFetchResult<PHAsset>) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self else { return }
-            var counts: [String: Int] = [:]
-            let calendar = Calendar.current
-            fetchResult.enumerateObjects { asset, _, _ in
-                guard let date = asset.creationDate ?? asset.modificationDate else { return }
-                let comps = calendar.dateComponents([.year, .month], from: date)
-                guard let year = comps.year, let month = comps.month else { return }
-                let key = "\(year)-\(month)"
-                counts[key, default: 0] += 1
-            }
-            DispatchQueue.main.async {
-                self.monthAssetTotals = counts
-                #if DEBUG
-                print("[MonthAssetTotals] totals=\(counts)")
-                #endif
-            }
-        }
-    }
-
     private func prefetchMonthAssetsIfNeeded(year: Int, month: Int) {
         let key = "\(year)-\(month)"
         guard !monthPrefetchingKeys.contains(key) else { return }
         monthPrefetchingKeys.insert(key)
 
-        if FeatureToggles.enableZeroLatencyPipeline {
-            let task = Task<Void, Never> { [weak self] in
-                guard let self else { return }
-                let momentIds = self.metadataSnapshot.monthMomentIdentifiers[key] ?? []
-                let descriptors: [AssetDescriptor]
-                if !momentIds.isEmpty {
-                    descriptors = await self.photoRepository.fetchAssets(forMomentIdentifiers: momentIds, limit: 400)
-                } else {
-                    descriptors = await self.photoRepository.prefetchMonth(year, month: month, limit: 400)
-                }
-                guard !Task.isCancelled else { return }
-                let assets = descriptors.map(\.asset)
-                await MainActor.run {
-                    self.ingestAssets(assets)
-                    self.monthPrefetchingKeys.remove(key)
-                }
-                self.imagePipeline.prefetch(assets, targetSize: CGSize(width: 280, height: 280))
-            }
-            Task { [weak self] in
-                guard let self else { return }
-                await self.taskPool.insert(task, scope: .prefetch)
-            }
-            return
-        }
-
-        guard let fetchResult = assetsFetchResult else { return }
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        let task = Task<Void, Never> { [weak self] in
             guard let self else { return }
-            let assets = self.assets(in: fetchResult, year: year, month: month)
-            let limitedAssets = Array(assets.prefix(400))
-            DispatchQueue.main.async {
-                self.ingestAssets(limitedAssets)
+            let momentIds = self.metadataSnapshot.monthMomentIdentifiers[key] ?? []
+            let descriptors: [AssetDescriptor]
+            if !momentIds.isEmpty {
+                descriptors = await self.photoRepository.fetchAssets(forMomentIdentifiers: momentIds, limit: 400)
+            } else {
+                descriptors = await self.photoRepository.prefetchMonth(year, month: month, limit: 400)
+            }
+            guard !Task.isCancelled else { return }
+            let assets = descriptors.map(\.asset)
+            await MainActor.run {
+                self.ingestAssets(assets)
                 self.monthPrefetchingKeys.remove(key)
             }
+            self.imagePipeline.prefetch(assets, targetSize: CGSize(width: 280, height: 280))
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.taskPool.insert(task, scope: .prefetch)
         }
     }
 

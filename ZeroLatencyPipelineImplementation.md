@@ -42,7 +42,7 @@ SwiftUI View → ViewModel (PhotoCleanup / Timeline / Modules)
 - `PhotoCleanupViewModel` 新增依赖：
   - `metadataRepository` → 初始化时调用 `setupMetadataPipeline()` 并通过 Combine 更新 `monthAssetTotals`、`deviceStorageUsage`。
   - `photoRepository` / `imagePipeline` / `taskPool` / `backgroundScheduler` → 负责真实资源、缓存、后台任务。
-  - `FeatureToggles.enableZeroLatencyPipeline` + `lazyLoadPhotoSessions` 决定是否在启动时加载真实照片。
+  - 实际资产统一走零延迟策略：冷启动只恢复 metadata snapshot，真实分页仅在用户进入 Cleaner/专题/时光机时由 `ensureRealAssetPipeline()` 触发，不再提供 1.0 回退开关。
 - `showCleaner / showDetail / showCleaner(forMonth:)` 中调用 `ensureRealAssetPipeline()`，确保真实资源按需加载。
 - `TimeMachineTimelineViewModel` 仍监听 `monthAssetTotals`，但这些值已由 metadata 缓存即时提供。
 
@@ -85,7 +85,7 @@ await taskPool.insert(prefetchTask, scope: .prefetch)     // 离开页面时 Tas
   - `prefetchMonthAssetsIfNeeded` 改用 `PhotoRepository + ImagePipeline + TaskPool`，支持取消。
   - `scheduleBackgroundAnalysisIfNeeded` 接入 `BackgroundJobScheduler`，避免主线程阻塞。
   - `prepareSession(with:month:)` 支持零延迟时光机将按月解析出的 `PHAsset` 列注入旧 Cleaner，会构建 `PhotoItem`、恢复标记状态并直接打开原有 UI。同时整合 `LargeImagePager`，只维持「当前、下一张、第三张」三张全屏大图：后台线程解码、最多缓存 3-4 张，并在滑动时动态替换，返回月份时也不会一次性释放所有 `UIImage`，避免内存抖动。
-- `FeatureToggles.swift`：新增 `enableZeroLatencyPipeline`、`lazyLoadPhotoSessions` 控制入口。
+- `FeatureToggles.swift`：现仅保留 UI/演示相关开关（`showCleanupResetControls`、`useZeroLatencyArchitectureDemo`），数据层逻辑固定为零延迟模式。
 - 新文件：
   - `PhotoTidy/Models/DeviceStorageUsage.swift`
   - `PhotoTidy/DataLayer/Metadata/*`
@@ -97,7 +97,7 @@ await taskPool.insert(prefetchTask, scope: .prefetch)     // 离开页面时 Tas
 ## 9. 性能优化清单
 
 - **60 FPS**：`ImagePipeline` 的 memory/disk cache + `PHCachingImageManager` 窗口提升滚动流畅度；`TaskPool` 保证离场即取消重任务。
-- **启动速度**：首帧只读 `MetadataCacheStore`（JSON 解码 < 50ms），`FeatureToggles.lazyLoadPhotoSessions` 阻止不必要的真实资源加载。
+- **启动速度**：首帧只读 `MetadataCacheStore`（JSON 解码 < 50ms），真实资源由 `ensureRealAssetPipeline()` 在用户进入功能时才懒加载，避免无谓的 PhotoKit 查询。
 - **后台任务**：`BackgroundJobScheduler` 将 Vision/模糊分析搬到 utility task，默认批量 50 张，可随 `TaskPool` 暂停。
 - **内存占用**：`ImagePipeline` 默认 120MB `NSCache` + 200MB `ImageDiskCache`，离开页面或收到内存警告时可统一 `cancelAll`。
 - **时光机数据**：`monthAssetTotals` 直接由 metadata 缓存提供，仅在 PhotoKit 有变更时重新扫描，从而在大库中依旧“秒开”。
@@ -115,4 +115,4 @@ await taskPool.insert(prefetchTask, scope: .prefetch)     // 离开页面时 Tas
 **统一保证：**
 - 应用内只有一份 `MetadataRepository`（由 `PhotoCleanupViewModel` 构建并注入时光机），冷启动时所有 Tab/视图共用这份 snapshot。
 - 所有真实 `PHAsset` 查询都集中在 `PhotoRepository`，并受 `TaskPool` 管控，可在页面离场、Tab 切换或会话取消时立即停止。
-- `FeatureToggles.enableZeroLatencyPipeline / lazyLoadPhotoSessions / useZeroLatencyTimeMachine` 默认开启，确保任何 build 均以零延迟策略运行；若需禁用，只需调整这些常量。***
+- 数据层零延迟方案已成为默认实现，仅保留 `FeatureToggles.useZeroLatencyArchitectureDemo` 作为可选入口（切换到全新 RootView 演示零延迟 UI）。***
