@@ -28,6 +28,7 @@ final class PhotoLoader: ObservableObject {
     private var isLoadingPage = false
     private var backgroundPrefetchTask: Task<Void, Never>?
     private var cachingRange: Range<Int> = 0..<0
+    private var shouldPauseBackgroundPrefetch = false
 
     private let firstPageSize = 100
     private let pageSize = 200
@@ -58,8 +59,21 @@ final class PhotoLoader: ObservableObject {
         imageCache.stopCachingAll()
     }
 
+    func pauseBackgroundPrefetch() {
+        shouldPauseBackgroundPrefetch = true
+        backgroundPrefetchTask?.cancel()
+        backgroundPrefetchTask = nil
+    }
+
+    func resumeBackgroundPrefetchIfNeeded() {
+        guard shouldPauseBackgroundPrefetch else { return }
+        shouldPauseBackgroundPrefetch = false
+        scheduleBackgroundPrefetchIfNeeded()
+    }
+
     func reloadLibrary() {
         stop()
+        shouldPauseBackgroundPrefetch = false
         items = []
         fetchResult = nil
         currentUpperBound = 0
@@ -74,6 +88,7 @@ final class PhotoLoader: ObservableObject {
         let shouldLoadNext = currentUpperBound - index <= bufferThreshold
         if shouldLoadNext {
             loadNextPage(trigger: .userScrolling)
+            resumeBackgroundPrefetchIfNeeded()
         }
     }
 
@@ -123,6 +138,7 @@ final class PhotoLoader: ObservableObject {
     }
 
     private func scheduleBackgroundPrefetchIfNeeded() {
+        guard !shouldPauseBackgroundPrefetch else { return }
         backgroundPrefetchTask?.cancel()
         backgroundPrefetchTask = Task(priority: .utility) { [weak self] in
             while let self = self {

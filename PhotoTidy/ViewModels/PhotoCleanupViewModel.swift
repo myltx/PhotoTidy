@@ -66,6 +66,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     private let largeImagePager = LargeImagePager()
     private let taskPool = TaskPool()
     private let backgroundScheduler = BackgroundJobScheduler()
+    private let ingestQueue = DispatchQueue(label: "PhotoCleanupViewModel.ingest", qos: .userInitiated)
     private var assetsFetchResult: PHFetchResult<PHAsset>?
     private var cancellables: Set<AnyCancellable> = []
 private let zeroLatencyImageCache = ImageCache()
@@ -85,6 +86,7 @@ private let zeroLatencyImageCache = ImageCache()
 private var hasScheduledInitialAssetLoad = false
     private var sessionPreparationTask: Task<SessionPreparationResult, Never>?
     private var sessionPreparationToken: UUID?
+    private var backgroundAnalysisDebounceTask: Task<Void, Never>?
 
     // MARK: - Computed Properties
     
@@ -525,6 +527,8 @@ private var hasScheduledInitialAssetLoad = false
         Task { await taskPool.cancel(scope: .prefetch) }
         cancelSessionPreparation()
         Task { await resetLargeImagePipeline() }
+        backgroundAnalysisDebounceTask?.cancel()
+        backgroundAnalysisDebounceTask = nil
     }
 
     private func cancelSessionPreparation() {
@@ -535,41 +539,27 @@ private var hasScheduledInitialAssetLoad = false
 
     private func ingestAssets(_ assets: [PHAsset]) {
         guard !assets.isEmpty else { return }
-        let cacheEntries = analysisCache.snapshot()
-        var incoming: [PhotoItem] = []
-
+        var uniqueAssets: [PHAsset] = []
+        uniqueAssets.reserveCapacity(assets.count)
         for asset in assets {
             let id = asset.localIdentifier
             if loadedAssetIdentifiers.contains(id) { continue }
             loadedAssetIdentifiers.insert(id)
-            let estimatedSize = assetResourceSize(for: asset)
-            var item = photoItem(for: asset, estimatedSize: estimatedSize)
-            if let entry = cacheEntries[id],
-               entry.version == PhotoAnalysisCacheEntry.currentVersion,
-               entry.fileSize == item.fileSize {
-                Self.applyCachedEntry(entry, to: &item)
+            uniqueAssets.append(asset)
+        }
+        guard !uniqueAssets.isEmpty else { return }
+        let cacheEntries = analysisCache.snapshot()
+        ingestQueue.async { [weak self] in
+            guard let self else { return }
+            let prepared = PhotoCleanupViewModel.buildPhotoItems(from: uniqueAssets, cache: cacheEntries)
+            guard !prepared.isEmpty else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                var incoming = prepared
+                self.restoreSelectionStates(in: &incoming)
+                self.integrateIncomingItems(incoming)
             }
-            incoming.append(item)
         }
-
-        guard !incoming.isEmpty else { return }
-        restoreSelectionStates(in: &incoming)
-        items.append(contentsOf: incoming)
-        if isLoading {
-            isLoading = false
-        }
-        if !hasInitializedSession {
-            hasInitializedSession = true
-            updateSessionItems(for: currentFilter)
-        } else if !isShowingCleaner {
-            refreshSession()
-        } else if activeMonthContext == nil {
-            appendIncomingToSession(newItems: incoming)
-        } else if let context = activeMonthContext,
-                  incomingContainsItems(forYear: context.year, month: context.month, items: incoming) {
-            rebuildMonthSession(year: context.year, month: context.month)
-        }
-        scheduleBackgroundAnalysisIfNeeded()
     }
 
     private func incomingContainsItems(forYear year: Int, month: Int, items: [PhotoItem]) -> Bool {
@@ -590,6 +580,28 @@ private var hasScheduledInitialAssetLoad = false
         filtered.forEach { sessionItemIds.insert($0.id) }
     }
 
+    @MainActor
+    private func integrateIncomingItems(_ incoming: [PhotoItem]) {
+        guard !incoming.isEmpty else { return }
+        items.append(contentsOf: incoming)
+        if isLoading {
+            isLoading = false
+        }
+        if !hasInitializedSession {
+            hasInitializedSession = true
+            updateSessionItems(for: currentFilter)
+            pagingLoader.pauseBackgroundPrefetch()
+        } else if !isShowingCleaner {
+            refreshSession()
+        } else if activeMonthContext == nil {
+            appendIncomingToSession(newItems: incoming)
+        } else if let context = activeMonthContext,
+                  incomingContainsItems(forYear: context.year, month: context.month, items: incoming) {
+            rebuildMonthSession(year: context.year, month: context.month)
+        }
+        scheduleBackgroundAnalysisIfNeeded()
+    }
+
     nonisolated private static func applyCachedEntry(_ entry: PhotoAnalysisCacheEntry, to item: inout PhotoItem) {
         item.isScreenshot = entry.isScreenshot
         item.isDocumentLike = entry.isDocumentLike
@@ -608,7 +620,22 @@ private var hasScheduledInitialAssetLoad = false
     }
 
     private func scheduleBackgroundAnalysisIfNeeded() {
-        guard !hasTriggeredBackgroundAnalysis, !items.isEmpty else { return }
+        guard !items.isEmpty else { return }
+        backgroundAnalysisDebounceTask?.cancel()
+        backgroundAnalysisDebounceTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            await self?.triggerBackgroundAnalysisIfIdle()
+        }
+    }
+
+    @MainActor
+    private func triggerBackgroundAnalysisIfIdle() {
+        backgroundAnalysisDebounceTask = nil
+        guard !isShowingCleaner, !isLoading else {
+            scheduleBackgroundAnalysisIfNeeded()
+            return
+        }
+        guard !hasTriggeredBackgroundAnalysis else { return }
         hasTriggeredBackgroundAnalysis = true
         Task { await backgroundScheduler.cancel(job: .similarity) }
         Task { [weak self] in
@@ -1400,23 +1427,22 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
         }
     }
 
-    private func buildPhotoItems(from assets: [PHAsset]) -> [PhotoItem] {
+    nonisolated private static func buildPhotoItems(from assets: [PHAsset], cache: [String: PhotoAnalysisCacheEntry]) -> [PhotoItem] {
         guard !assets.isEmpty else { return [] }
-        let cacheEntries = analysisCache.snapshot()
         var incoming: [PhotoItem] = []
+        incoming.reserveCapacity(assets.count)
         for asset in assets {
             if Task.isCancelled { return [] }
-            let estimatedSize = PhotoCleanupViewModel.assetResourceSizeStatic(for: asset)
-            var item = photoItem(for: asset, estimatedSize: estimatedSize)
+            let estimatedSize = assetResourceSizeStatic(for: asset)
+            var item = Self.makePhotoItem(for: asset, estimatedSize: estimatedSize)
             let id = item.id
-            if let entry = cacheEntries[id],
+            if let entry = cache[id],
                entry.version == PhotoAnalysisCacheEntry.currentVersion,
                entry.fileSize == item.fileSize {
                 Self.applyCachedEntry(entry, to: &item)
             }
             incoming.append(item)
         }
-        restoreSelectionStates(in: &incoming)
         return incoming.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
     }
 
