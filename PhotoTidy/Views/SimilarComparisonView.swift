@@ -8,6 +8,7 @@ struct SimilarComparisonView: View {
     @State private var groups: [SimilarGroup] = []
     @State private var selections: [Int: Set<String>] = [:]
     @State private var previewItem: PhotoItem?
+    @State private var pendingRecomputeWorkItem: DispatchWorkItem?
 
     private let chipFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -46,11 +47,12 @@ struct SimilarComparisonView: View {
         }
         .onAppear(perform: recomputeGroups)
         .onChange(of: viewModel.items) { _ in
-            recomputeGroups()
+            scheduleRecomputeGroups()
         }
         .fullScreenCover(item: $previewItem) { item in
             FullScreenPreviewView(item: item, viewModel: viewModel)
         }
+        .onDisappear(perform: cancelPendingRecompute)
     }
 
     // MARK: - UI Sections
@@ -243,15 +245,14 @@ struct SimilarComparisonView: View {
             selections.removeValue(forKey: id)
         }
         if groups.isEmpty {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                recomputeGroups()
-            }
+            scheduleRecomputeGroups(after: 0.4)
         }
     }
 
     // MARK: - Data Preparation
 
     private func recomputeGroups() {
+        cancelPendingRecompute()
         var buckets: [Int: [PhotoItem]] = [:]
         var seenPerGroup: [Int: Set<String>] = [:]
 
@@ -291,6 +292,18 @@ struct SimilarComparisonView: View {
 
         groups = nextGroups.sorted { $0.latestDate > $1.latestDate }
         selections = nextSelections
+    }
+
+    private func scheduleRecomputeGroups(after delay: TimeInterval = 0.35) {
+        cancelPendingRecompute()
+        let work = DispatchWorkItem { self.recomputeGroups() }
+        pendingRecomputeWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func cancelPendingRecompute() {
+        pendingRecomputeWorkItem?.cancel()
+        pendingRecomputeWorkItem = nil
     }
 
     private func recommendedIndex(for group: [PhotoItem]) -> Int {
