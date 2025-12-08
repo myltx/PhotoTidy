@@ -83,10 +83,11 @@ private let zeroLatencyImageCache = ImageCache()
     private var selectedAlbumAssetIds: Set<String>?
     private var hasLoadedAlbumFilters = false
     private var monthPrefetchingKeys: Set<String> = []
-private var hasScheduledInitialAssetLoad = false
+    private var hasScheduledInitialAssetLoad = false
     private var sessionPreparationTask: Task<SessionPreparationResult, Never>?
     private var sessionPreparationToken: UUID?
     private var backgroundAnalysisDebounceTask: Task<Void, Never>?
+    private var backgroundPrefetchResumeTask: Task<Void, Never>?
 
     // MARK: - Computed Properties
     
@@ -259,6 +260,7 @@ private var hasScheduledInitialAssetLoad = false
     // MARK: - Navigation
     
     func showCleaner(filter: CleanupFilterMode) {
+        pagingLoader.pauseBackgroundPrefetch()
         ensureRealAssetPipeline()
         activeMonthContext = nil
         isShowingCleaner = true
@@ -275,6 +277,7 @@ private var hasScheduledInitialAssetLoad = false
     }
 
     func showCleaner(forMonth year: Int, month: Int) {
+        pagingLoader.pauseBackgroundPrefetch()
         ensureRealAssetPipeline()
         activeMonthContext = (year, month)
         rebuildMonthSession(year: year, month: month)
@@ -311,15 +314,18 @@ private var hasScheduledInitialAssetLoad = false
         activeMonthContext = nil
         cancelSessionPreparation()
         Task { await resetLargeImagePipeline() }
+        scheduleBackgroundPrefetchResumeIfIdle(after: 1_000_000_000)
     }
 
     func showDetail(_ detail: DashboardDetail) {
+        pagingLoader.pauseBackgroundPrefetch()
         ensureRealAssetPipeline()
         activeDetail = detail
     }
 
     func dismissDetail() {
         activeDetail = nil
+        scheduleBackgroundPrefetchResumeIfIdle(after: 1_000_000_000)
     }
 
     private func prepareSessionInternal(assets: [PHAsset], month: MonthInfo) async -> SessionPreparationResult {
@@ -529,6 +535,8 @@ private var hasScheduledInitialAssetLoad = false
         Task { await resetLargeImagePipeline() }
         backgroundAnalysisDebounceTask?.cancel()
         backgroundAnalysisDebounceTask = nil
+        backgroundPrefetchResumeTask?.cancel()
+        backgroundPrefetchResumeTask = nil
     }
 
     private func cancelSessionPreparation() {
@@ -591,6 +599,7 @@ private var hasScheduledInitialAssetLoad = false
             hasInitializedSession = true
             updateSessionItems(for: currentFilter)
             pagingLoader.pauseBackgroundPrefetch()
+            scheduleBackgroundPrefetchResumeIfIdle()
         } else if !isShowingCleaner {
             refreshSession()
         } else if activeMonthContext == nil {
@@ -600,6 +609,24 @@ private var hasScheduledInitialAssetLoad = false
             rebuildMonthSession(year: context.year, month: context.month)
         }
         scheduleBackgroundAnalysisIfNeeded()
+    }
+
+    private func scheduleBackgroundPrefetchResumeIfIdle(after delay: UInt64 = 1_000_000_000) {
+        backgroundPrefetchResumeTask?.cancel()
+        backgroundPrefetchResumeTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            await self?.resumeBackgroundPrefetchIfPossible()
+        }
+    }
+
+    @MainActor
+    private func resumeBackgroundPrefetchIfPossible() {
+        backgroundPrefetchResumeTask = nil
+        guard !isShowingCleaner else {
+            scheduleBackgroundPrefetchResumeIfIdle(after: 1_000_000_000)
+            return
+        }
+        pagingLoader.resumeBackgroundPrefetchIfNeeded()
     }
 
     nonisolated private static func applyCachedEntry(_ entry: PhotoAnalysisCacheEntry, to item: inout PhotoItem) {
