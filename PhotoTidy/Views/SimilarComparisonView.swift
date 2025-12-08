@@ -5,7 +5,6 @@ struct SimilarComparisonView: View {
     @ObservedObject var viewModel: PhotoCleanupViewModel
     @Environment(\.dismiss) private var dismiss
 
-    @State private var groups: [SimilarGroup] = []
     @State private var displayedGroups: [SimilarGroup] = []
     @State private var allGroups: [SimilarGroup] = []
     @State private var selections: [Int: Set<String>] = [:]
@@ -63,6 +62,9 @@ struct SimilarComparisonView: View {
             }
         }
         .onAppear(perform: recomputeGroups)
+        .onChange(of: viewModel.similarGroupSnapshots) { _ in
+            scheduleRecomputeGroups()
+        }
         .onChange(of: viewModel.items) { _ in
             scheduleRecomputeGroups()
         }
@@ -245,7 +247,7 @@ struct SimilarComparisonView: View {
         if let recommended = group.items[safe: group.recommendedIndex] {
             viewModel.logSkippedPhoto(recommended, source: .similarGroup)
         }
-        removeGroup(group.id)
+        removeGroup(group)
     }
 
     private func applySelection(for group: SimilarGroup) {
@@ -253,16 +255,17 @@ struct SimilarComparisonView: View {
         for item in group.items {
             viewModel.setDeletion(item, to: !keepIds.contains(item.id))
         }
-        removeGroup(group.id)
+        removeGroup(group)
     }
 
-    private func removeGroup(_ id: Int) {
+    private func removeGroup(_ group: SimilarGroup) {
         withAnimation {
-            displayedGroups.removeAll { $0.id == id }
-            allGroups.removeAll { $0.id == id }
-            groups = allGroups
-            selections.removeValue(forKey: id)
+            displayedGroups.removeAll { $0.id == group.id }
+            allGroups.removeAll { $0.id == group.id }
+            selections.removeValue(forKey: group.id)
         }
+        viewModel.clearSimilarGroupMarkers(for: group.items.map(\.id))
+        viewModel.removeSimilarGroupSnapshot(withId: group.id)
         if displayedGroups.isEmpty {
             loadNextBatchIfNeeded()
         }
@@ -275,45 +278,47 @@ struct SimilarComparisonView: View {
 
     private func recomputeGroups() {
         cancelPendingRecompute()
-        var buckets: [Int: [PhotoItem]] = [:]
-        var seenPerGroup: [Int: Set<String>] = [:]
-
-        for item in viewModel.items {
-            guard let groupId = item.similarGroupId else { continue }
-            var seen = seenPerGroup[groupId] ?? []
-            if seen.contains(item.id) { continue }
-            seen.insert(item.id)
-            seenPerGroup[groupId] = seen
-            buckets[groupId, default: []].append(item)
+        let snapshots = viewModel.similarGroupSnapshots
+        guard !snapshots.isEmpty else {
+            allGroups = []
+            selections = [:]
+            displayedGroups = []
+            nextGroupIndex = 0
+            return
         }
 
+        let itemsLookup = Dictionary(uniqueKeysWithValues: viewModel.items.map { ($0.id, $0) })
         var nextGroups: [SimilarGroup] = []
         var nextSelections: [Int: Set<String>] = [:]
 
-        for (groupId, items) in buckets {
-            let sorted = items.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
-            guard !sorted.isEmpty else { continue }
-            let recommended = recommendedIndex(for: sorted)
-            let latestDate = sorted.first?.creationDate ?? .distantPast
+        for snapshot in snapshots {
+            let resolvedItems = snapshot.assetIds.compactMap { itemsLookup[$0] }
+            guard resolvedItems.count >= 2 else { continue }
+            let resolvedRecommendedIndex: Int
+            if let match = resolvedItems.firstIndex(where: { $0.id == snapshot.recommendedAssetId }) {
+                resolvedRecommendedIndex = match
+            } else {
+                resolvedRecommendedIndex = recommendedIndex(for: resolvedItems)
+            }
+
             nextGroups.append(
                 SimilarGroup(
-                    id: groupId,
-                    items: sorted,
-                    recommendedIndex: recommended,
-                    latestDate: latestDate
+                    id: snapshot.groupId,
+                    items: resolvedItems,
+                    recommendedIndex: resolvedRecommendedIndex,
+                    latestDate: snapshot.latestDate
                 )
             )
 
-            let availableIds = Set(sorted.map(\.id))
-            if let existing = selections[groupId]?.intersection(availableIds), !existing.isEmpty {
-                nextSelections[groupId] = existing
+            let availableIds = Set(resolvedItems.map(\.id))
+            if let existing = selections[snapshot.groupId]?.intersection(availableIds), !existing.isEmpty {
+                nextSelections[snapshot.groupId] = existing
             } else {
-                nextSelections[groupId] = [sorted[recommended].id]
+                nextSelections[snapshot.groupId] = [resolvedItems[resolvedRecommendedIndex].id]
             }
         }
 
-        allGroups = nextGroups.sorted { $0.latestDate > $1.latestDate }
-        groups = allGroups
+        allGroups = nextGroups
         selections = nextSelections
         nextGroupIndex = 0
         displayInitialBatch()
@@ -353,9 +358,9 @@ struct SimilarComparisonView: View {
     }
 
     private func loadNextBatchIfNeeded() {
-        guard nextGroupIndex < groups.count else { return }
-        let upper = min(nextGroupIndex + batchSize, groups.count)
-        let batch = groups[nextGroupIndex..<upper]
+        guard nextGroupIndex < allGroups.count else { return }
+        let upper = min(nextGroupIndex + batchSize, allGroups.count)
+        let batch = allGroups[nextGroupIndex..<upper]
         withAnimation {
             displayedGroups.append(contentsOf: batch)
         }

@@ -31,8 +31,9 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     @Published var lastDeletedItemsCount: Int = 0
     @Published var deviceStorageUsage: DeviceStorageUsage = .empty
     @Published private(set) var metadataSnapshot: MetadataSnapshot = .empty
-@Published private(set) var timeMachineSnapshots: [String: TimeMachineMonthProgress] = [:]
-@Published private(set) var largeImageCache: [String: UIImage] = [:]
+    @Published private(set) var timeMachineSnapshots: [String: TimeMachineMonthProgress] = [:]
+    @Published private(set) var largeImageCache: [String: UIImage] = [:]
+    @Published private(set) var similarGroupSnapshots: [SimilarGroupSnapshot] = []
     @Published var albumFilters: [AlbumFilter] = [.all]
     @Published var selectedAlbumFilter: AlbumFilter = .all
     
@@ -67,6 +68,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     private let taskPool = TaskPool()
     private let backgroundScheduler = BackgroundJobScheduler()
     private let ingestQueue = DispatchQueue(label: "PhotoCleanupViewModel.ingest", qos: .userInitiated)
+    private let similarGroupCache = SimilarGroupCacheStore()
     private var assetsFetchResult: PHFetchResult<PHAsset>?
     private var cancellables: Set<AnyCancellable> = []
 private let zeroLatencyImageCache = ImageCache()
@@ -83,11 +85,12 @@ private let zeroLatencyImageCache = ImageCache()
     private var selectedAlbumAssetIds: Set<String>?
     private var hasLoadedAlbumFilters = false
     private var monthPrefetchingKeys: Set<String> = []
-    private var hasScheduledInitialAssetLoad = false
+private var hasScheduledInitialAssetLoad = false
     private var sessionPreparationTask: Task<SessionPreparationResult, Never>?
     private var sessionPreparationToken: UUID?
     private var backgroundAnalysisDebounceTask: Task<Void, Never>?
     private var backgroundPrefetchResumeTask: Task<Void, Never>?
+    private var similarGroupRefreshWorkItem: DispatchWorkItem?
 
     // MARK: - Computed Properties
     
@@ -175,6 +178,13 @@ private let zeroLatencyImageCache = ImageCache()
         PhotoCleanupViewModel.shared = self
         refreshTimeMachineSnapshots()
         setupMetadataPipeline()
+        Task { [weak self] in
+            guard let self else { return }
+            let cached = await self.similarGroupCache.currentSnapshots()
+            await MainActor.run {
+                self.similarGroupSnapshots = cached
+            }
+        }
         PHPhotoLibrary.shared().register(self)
         if authorizationStatus.isAuthorized {
             ensureMetadataBootstrap()
@@ -205,6 +215,7 @@ private let zeroLatencyImageCache = ImageCache()
         Task.detached {
             await pager.configure(assets: [], targetSize: .zero)
         }
+        cancelSimilarGroupSnapshotRefresh()
     }
 
     private func setupMetadataPipeline() {
@@ -537,6 +548,7 @@ private let zeroLatencyImageCache = ImageCache()
         backgroundAnalysisDebounceTask = nil
         backgroundPrefetchResumeTask?.cancel()
         backgroundPrefetchResumeTask = nil
+        cancelSimilarGroupSnapshotRefresh()
     }
 
     private func cancelSessionPreparation() {
@@ -609,6 +621,7 @@ private let zeroLatencyImageCache = ImageCache()
             rebuildMonthSession(year: context.year, month: context.month)
         }
         scheduleBackgroundAnalysisIfNeeded()
+        scheduleSimilarGroupSnapshotRefresh()
     }
 
     private func scheduleBackgroundPrefetchResumeIfIdle(after delay: UInt64 = 1_000_000_000) {
@@ -669,6 +682,118 @@ private let zeroLatencyImageCache = ImageCache()
             guard let self else { return }
             await self.backgroundScheduler.schedule(job: .similarity) { [weak self] in
                 self?.analyzeAllItemsInBackground()
+            }
+        }
+    }
+
+    private func scheduleSimilarGroupSnapshotRefresh(after delay: TimeInterval = 0.6) {
+        similarGroupRefreshWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.recomputeSimilarGroupSnapshots()
+        }
+        similarGroupRefreshWorkItem = workItem
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    private func cancelSimilarGroupSnapshotRefresh() {
+        similarGroupRefreshWorkItem?.cancel()
+        similarGroupRefreshWorkItem = nil
+    }
+
+    private func recomputeSimilarGroupSnapshots() {
+        cancelSimilarGroupSnapshotRefresh()
+        let itemsSnapshot = self.items
+        guard !itemsSnapshot.isEmpty else {
+            Task { @MainActor [weak self] in
+                self?.similarGroupSnapshots = []
+            }
+            Task { [weak self] in
+                guard let self else { return }
+                await self.similarGroupCache.replace(with: [])
+            }
+            return
+        }
+
+        var grouped: [Int: [PhotoItem]] = [:]
+        var seen: [Int: Set<String>] = [:]
+        for item in itemsSnapshot {
+            guard let groupId = item.similarGroupId else { continue }
+            var membership = seen[groupId] ?? []
+            if membership.contains(item.id) { continue }
+            membership.insert(item.id)
+            seen[groupId] = membership
+            grouped[groupId, default: []].append(item)
+        }
+
+        var snapshots: [SimilarGroupSnapshot] = []
+        let now = Date()
+        for (groupId, items) in grouped {
+            let uniqueItems = items
+            guard uniqueItems.count >= 2 else { continue }
+            let sorted = uniqueItems.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
+            guard !sorted.isEmpty else { continue }
+            let recommendedIndex = recommendedIndex(in: sorted)
+            let snapshot = SimilarGroupSnapshot(
+                groupId: groupId,
+                assetIds: sorted.map(\.id),
+                recommendedAssetId: sorted[recommendedIndex].id,
+                latestDate: sorted.first?.creationDate ?? .distantPast,
+                updatedAt: now
+            )
+            snapshots.append(snapshot)
+        }
+
+        let sortedSnapshots = snapshots.sorted { $0.latestDate > $1.latestDate }
+
+        Task { [weak self] in
+            guard let self else { return }
+            await self.similarGroupCache.replace(with: sortedSnapshots)
+        }
+        Task { @MainActor [weak self] in
+            self?.similarGroupSnapshots = sortedSnapshots
+        }
+    }
+
+    private func recommendedIndex(in group: [PhotoItem]) -> Int {
+        guard !group.isEmpty else { return 0 }
+        var bestIndex = 0
+        var bestScore = -Double.infinity
+        for (index, item) in group.enumerated() {
+            let blurScore = item.blurScore ?? 0
+            let exposurePenalty = item.exposureIsBad ? -0.5 : 0
+            let score = blurScore + exposurePenalty
+            if score > bestScore {
+                bestScore = score
+                bestIndex = index
+            }
+        }
+        return bestIndex
+    }
+
+    func removeSimilarGroupSnapshot(withId groupId: Int) {
+        DispatchQueue.main.async {
+            self.similarGroupSnapshots.removeAll { $0.groupId == groupId }
+            let current = self.similarGroupSnapshots
+            Task { [weak self] in
+                guard let self else { return }
+                await self.similarGroupCache.replace(with: current)
+            }
+        }
+    }
+
+    func clearSimilarGroupMarkers(for identifiers: [String]) {
+        guard !identifiers.isEmpty else { return }
+        DispatchQueue.main.async {
+            var updated = false
+            for id in identifiers {
+                if let index = self.items.firstIndex(where: { $0.id == id }) {
+                    self.items[index].similarGroupId = nil
+                    self.items[index].similarityKind = nil
+                    updated = true
+                }
+            }
+            if updated {
+                self.scheduleSimilarGroupSnapshotRefresh(after: 0.2)
             }
         }
     }
@@ -757,6 +882,7 @@ private let zeroLatencyImageCache = ImageCache()
                 self.revalidateSimilarGroups()
                 self.refreshSession()
                 self.hasTriggeredBackgroundAnalysis = false
+                self.scheduleSimilarGroupSnapshotRefresh()
             }
         }
     }
@@ -881,6 +1007,7 @@ private let zeroLatencyImageCache = ImageCache()
             persistSelectionState(for: items[index])
             syncSmartCleanupPendingFlag()
             refreshSession() // Refresh session to exclude已删除
+            scheduleSimilarGroupSnapshotRefresh(after: 0.2)
         }
     }
 
@@ -890,6 +1017,7 @@ private let zeroLatencyImageCache = ImageCache()
             persistSelectionState(for: items[index])
             syncSmartCleanupPendingFlag()
             refreshSession()
+            scheduleSimilarGroupSnapshotRefresh(after: 0.2)
         }
     }
 
@@ -899,6 +1027,7 @@ private let zeroLatencyImageCache = ImageCache()
             persistSelectionState(for: items[index])
             syncSmartCleanupPendingFlag()
             refreshSession()
+            scheduleSimilarGroupSnapshotRefresh(after: 0.2)
         }
     }
     
@@ -914,6 +1043,7 @@ private let zeroLatencyImageCache = ImageCache()
         if updated {
             syncSmartCleanupPendingFlag()
             refreshSession()
+            scheduleSimilarGroupSnapshotRefresh(after: 0.2)
         }
     }
     
