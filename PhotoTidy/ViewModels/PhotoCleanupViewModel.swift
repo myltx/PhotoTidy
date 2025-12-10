@@ -63,15 +63,16 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     private let analysisCache: PhotoAnalysisCacheStore
     private let metadataRepository: MetadataRepository
     private let photoRepository = PhotoRepository()
+    private let libraryStore: LibraryStore
     private let imagePipeline = ImagePipeline()
     private let largeImagePager = LargeImagePager()
     private let taskPool = TaskPool()
     private let backgroundScheduler = BackgroundJobScheduler()
     private let ingestQueue = DispatchQueue(label: "PhotoCleanupViewModel.ingest", qos: .userInitiated)
     private let similarGroupCache = SimilarGroupCacheStore()
-    private var assetsFetchResult: PHFetchResult<PHAsset>?
     private var cancellables: Set<AnyCancellable> = []
 private let zeroLatencyImageCache = ImageCache()
+    private var currentLibraryId = UUID()
     private lazy var pagingLoader: PhotoLoader = {
         let loader = PhotoLoader(imageCache: zeroLatencyImageCache)
         loader.delegate = self
@@ -85,12 +86,13 @@ private let zeroLatencyImageCache = ImageCache()
     private var selectedAlbumAssetIds: Set<String>?
     private var hasLoadedAlbumFilters = false
     private var monthPrefetchingKeys: Set<String> = []
-private var hasScheduledInitialAssetLoad = false
+    private var hasScheduledInitialAssetLoad = false
     private var sessionPreparationTask: Task<SessionPreparationResult, Never>?
     private var sessionPreparationToken: UUID?
     private var backgroundAnalysisDebounceTask: Task<Void, Never>?
     private var backgroundPrefetchResumeTask: Task<Void, Never>?
     private var similarGroupRefreshWorkItem: DispatchWorkItem?
+    private var libraryStreamTask: Task<Void, Never>?
 
     // MARK: - Computed Properties
     
@@ -169,6 +171,7 @@ private var hasScheduledInitialAssetLoad = false
     ) {
         self.analysisCache = analysisCache
         self.metadataRepository = MetadataRepository(analysisCache: analysisCache)
+        self.libraryStore = LibraryStore(analysisCache: analysisCache, photoRepository: photoRepository)
         self.timeMachineProgressStore = timeMachineProgressStore
         self.smartCleanupProgressStore = smartCleanupProgressStore
         self.skippedPhotoStore = skippedPhotoStore
@@ -215,6 +218,7 @@ private var hasScheduledInitialAssetLoad = false
         Task.detached {
             await pager.configure(assets: [], targetSize: .zero)
         }
+        libraryStreamTask?.cancel()
         cancelSimilarGroupSnapshotRefresh()
     }
 
@@ -257,13 +261,11 @@ private var hasScheduledInitialAssetLoad = false
     // MARK: - PHPhotoLibraryChangeObserver
     
     func photoLibraryDidChange(_ changeInstance: PHChange) {
-        guard let fetchResult = assetsFetchResult,
-              changeInstance.changeDetails(for: fetchResult) != nil else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.resetPagingState()
-            self.pagingLoader.reloadLibrary()
             self.photoRepository.reloadLibrary()
+            self.startLibraryStream(scope: .all)
             self.metadataRepository.refresh()
         }
     }
@@ -474,11 +476,73 @@ private var hasScheduledInitialAssetLoad = false
     private func startPagingLoader() {
         if hasStartedPagingLoader {
             resetPagingState()
-            pagingLoader.reloadLibrary()
         } else {
             hasStartedPagingLoader = true
-            pagingLoader.start()
         }
+        startLibraryStream(scope: .all)
+    }
+
+    private func startLibraryStream(scope: PhotoQuery) {
+        libraryStreamTask?.cancel()
+        libraryStreamTask = Task { [weak self] in
+            guard let self else { return }
+            let stream = await self.libraryStore.start(scope: scope, pageSize: 200)
+            for await event in stream {
+                await MainActor.run {
+                    self.handleLibraryEvent(event)
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func handleLibraryEvent(_ event: LibraryStore.Event) {
+        switch event {
+        case .switching(_, let generation):
+            currentLibraryId = generation
+            isLoading = true
+        case .initialReady(let generation, let newItems):
+            guard generation == currentLibraryId else { return }
+            let (merged, added) = mergeItemsPreservingFlags(newItems: newItems, dropMissingExisting: true)
+            items = merged
+            loadedAssetIdentifiers = Set(merged.map(\.id))
+            hasInitializedSession = true
+            updateSessionItems(for: currentFilter)
+            isLoading = false
+            scheduleBackgroundPrefetchResumeIfIdle()
+            scheduleBackgroundAnalysisIfNeeded()
+            scheduleSimilarGroupSnapshotRefresh()
+        case .append(let generation, let newItems):
+            guard generation == currentLibraryId else { return }
+            let (merged, added) = mergeItemsPreservingFlags(newItems: newItems, dropMissingExisting: false)
+            items = merged
+            loadedAssetIdentifiers = Set(merged.map(\.id))
+            handleAppendedItems(added)
+        case .finished(let generation):
+            guard generation == currentLibraryId else { return }
+            scheduleBackgroundAnalysisIfNeeded()
+            scheduleSimilarGroupSnapshotRefresh()
+        }
+    }
+
+    @MainActor
+    private func handleAppendedItems(_ added: [PhotoItem]) {
+        guard !added.isEmpty else { return }
+        if !hasInitializedSession {
+            hasInitializedSession = true
+            updateSessionItems(for: currentFilter)
+            pagingLoader.pauseBackgroundPrefetch()
+            scheduleBackgroundPrefetchResumeIfIdle()
+        } else if !isShowingCleaner {
+            refreshSession()
+        } else if activeMonthContext == nil {
+            appendIncomingToSession(newItems: added)
+        } else if let context = activeMonthContext,
+                  incomingContainsItems(forYear: context.year, month: context.month, items: added) {
+            rebuildMonthSession(year: context.year, month: context.month)
+        }
+        scheduleBackgroundAnalysisIfNeeded()
+        scheduleSimilarGroupSnapshotRefresh()
     }
 
     private func loadAlbumFiltersIfNeeded() {
@@ -532,14 +596,9 @@ private var hasScheduledInitialAssetLoad = false
     }
 
     private func resetPagingState() {
-        loadedAssetIdentifiers.removeAll()
         hasTriggeredBackgroundAnalysis = false
         hasInitializedSession = false
-        sessionItemIds.removeAll()
-        items = []
-        sessionItems = []
-        currentIndex = 0
-        currentFilter = .all
+        loadedAssetIdentifiers.removeAll()
         Task { await taskPool.cancel(scope: .prefetch) }
         Task { await taskPool.cancel(scope: .prefetch) }
         cancelSessionPreparation()
@@ -549,6 +608,7 @@ private var hasScheduledInitialAssetLoad = false
         backgroundPrefetchResumeTask?.cancel()
         backgroundPrefetchResumeTask = nil
         cancelSimilarGroupSnapshotRefresh()
+        // 保留现有 items，等待新的流提交首批数据，避免闪空
     }
 
     private func cancelSessionPreparation() {
@@ -559,12 +619,13 @@ private var hasScheduledInitialAssetLoad = false
 
     private func ingestAssets(_ assets: [PHAsset]) {
         guard !assets.isEmpty else { return }
+        var identifierSet = loadedAssetIdentifiers
         var uniqueAssets: [PHAsset] = []
         uniqueAssets.reserveCapacity(assets.count)
         for asset in assets {
             let id = asset.localIdentifier
-            if loadedAssetIdentifiers.contains(id) { continue }
-            loadedAssetIdentifiers.insert(id)
+            if identifierSet.contains(id) { continue }
+            identifierSet.insert(id)
             uniqueAssets.append(asset)
         }
         guard !uniqueAssets.isEmpty else { return }
@@ -575,6 +636,7 @@ private var hasScheduledInitialAssetLoad = false
             guard !prepared.isEmpty else { return }
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                self.loadedAssetIdentifiers = identifierSet
                 var incoming = prepared
                 self.restoreSelectionStates(in: &incoming)
                 self.integrateIncomingItems(incoming)
@@ -603,25 +665,10 @@ private var hasScheduledInitialAssetLoad = false
     @MainActor
     private func integrateIncomingItems(_ incoming: [PhotoItem]) {
         guard !incoming.isEmpty else { return }
-        items.append(contentsOf: incoming)
-        if isLoading {
-            isLoading = false
-        }
-        if !hasInitializedSession {
-            hasInitializedSession = true
-            updateSessionItems(for: currentFilter)
-            pagingLoader.pauseBackgroundPrefetch()
-            scheduleBackgroundPrefetchResumeIfIdle()
-        } else if !isShowingCleaner {
-            refreshSession()
-        } else if activeMonthContext == nil {
-            appendIncomingToSession(newItems: incoming)
-        } else if let context = activeMonthContext,
-                  incomingContainsItems(forYear: context.year, month: context.month, items: incoming) {
-            rebuildMonthSession(year: context.year, month: context.month)
-        }
-        scheduleBackgroundAnalysisIfNeeded()
-        scheduleSimilarGroupSnapshotRefresh()
+        let (merged, added) = mergeItemsPreservingFlags(newItems: incoming, dropMissingExisting: false)
+        items = merged
+        loadedAssetIdentifiers = Set(merged.map(\.id))
+        handleAppendedItems(added)
     }
 
     private func scheduleBackgroundPrefetchResumeIfIdle(after delay: UInt64 = 1_000_000_000) {
@@ -703,16 +750,9 @@ private var hasScheduledInitialAssetLoad = false
     private func recomputeSimilarGroupSnapshots() {
         cancelSimilarGroupSnapshotRefresh()
         let itemsSnapshot = self.items
-        guard !itemsSnapshot.isEmpty else {
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                if self.similarGroupSnapshots.isEmpty { return }
-                self.similarGroupSnapshots = []
-                Task.detached { await self.similarGroupCache.replace(with: []) }
-            }
-            return
-        }
+        guard !itemsSnapshot.isEmpty else { return }
 
+        let existingSnapshots = Dictionary(uniqueKeysWithValues: similarGroupSnapshots.map { ($0.groupId, $0) })
         var grouped: [Int: [PhotoItem]] = [:]
         var seen: [Int: Set<String>] = [:]
         for item in itemsSnapshot {
@@ -732,12 +772,23 @@ private var hasScheduledInitialAssetLoad = false
             let sorted = uniqueItems.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
             guard !sorted.isEmpty else { continue }
             let recommendedIndex = recommendedIndex(in: sorted)
+            let assetIds = sorted.map(\.id)
+            let recommendedId = sorted[recommendedIndex].id
+            let previousSnapshot = existingSnapshots[groupId]
+            let timestamp: Date
+            if let previous = previousSnapshot,
+               previous.assetIds == assetIds,
+               previous.recommendedAssetId == recommendedId {
+                timestamp = previous.updatedAt
+            } else {
+                timestamp = now
+            }
             let snapshot = SimilarGroupSnapshot(
                 groupId: groupId,
-                assetIds: sorted.map(\.id),
-                recommendedAssetId: sorted[recommendedIndex].id,
+                assetIds: assetIds,
+                recommendedAssetId: recommendedId,
                 latestDate: sorted.first?.creationDate ?? .distantPast,
-                updatedAt: now
+                updatedAt: timestamp
             )
             snapshots.append(snapshot)
         }
@@ -748,7 +799,8 @@ private var hasScheduledInitialAssetLoad = false
             guard let self else { return }
             if self.similarGroupSnapshots == sortedSnapshots { return }
             self.similarGroupSnapshots = sortedSnapshots
-            Task.detached { await self.similarGroupCache.replace(with: sortedSnapshots) }
+            let pending = sortedSnapshots
+            Task.detached { await self.similarGroupCache.replace(with: pending) }
         }
     }
 
@@ -1209,6 +1261,36 @@ private var hasScheduledInitialAssetLoad = false
             items[index].isLargeFile = items[index].fileSize > 15 * 1024 * 1024
         }
     }
+
+    private func mergeItemsPreservingFlags(newItems: [PhotoItem], dropMissingExisting: Bool) -> (merged: [PhotoItem], added: [PhotoItem]) {
+        let existingMap = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+        var merged: [PhotoItem] = []
+        var added: [PhotoItem] = []
+        let newMap = Dictionary(uniqueKeysWithValues: newItems.map { ($0.id, $0) })
+
+        let ids: [String]
+        if dropMissingExisting {
+            ids = Array(newMap.keys)
+        } else {
+            ids = Array(Set(existingMap.keys).union(newMap.keys))
+        }
+
+        for id in ids {
+            if var incoming = newMap[id] {
+                if let existing = existingMap[id] {
+                    incoming.markedForDeletion = existing.markedForDeletion
+                } else {
+                    added.append(incoming)
+                }
+                merged.append(incoming)
+            } else if let existing = existingMap[id], !dropMissingExisting {
+                merged.append(existing)
+            }
+        }
+
+        merged.sort { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
+        return (merged, added)
+    }
     
     private func buildCacheEntries(
         from analyzedItems: [PhotoItem],
@@ -1529,7 +1611,6 @@ struct AlbumFilter: Identifiable, Equatable {
 @MainActor
 extension PhotoCleanupViewModel: PhotoLoaderDelegate {
     func photoLoader(_ loader: PhotoLoader, didUpdateFetchResult fetchResult: PHFetchResult<PHAsset>) {
-        assetsFetchResult = fetchResult
         Task { await self.photoRepository.bootstrapLibraryIfNeeded() }
         DispatchQueue.global(qos: .utility).async { [weak self] in
             var identifiers: Set<String> = []
@@ -1537,6 +1618,10 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
                 identifiers.insert(asset.localIdentifier)
             }
             self?.analysisCache.pruneMissingEntries(keeping: identifiers)
+            Task { [weak self] in
+                guard let self else { return }
+                await self.similarGroupCache.prune(keeping: identifiers)
+            }
         }
     }
 
@@ -1599,6 +1684,13 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
             incoming.append(item)
         }
         return incoming.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
+    }
+
+    func loadPhotoItems(for identifiers: [String]) async -> [PhotoItem] {
+        await photoRepository.bootstrapLibraryIfNeeded()
+        let assets = await photoRepository.assets(for: identifiers)
+        let cacheSnapshot = analysisCache.snapshot()
+        return PhotoCleanupViewModel.buildZeroLatencyItems(from: assets, cache: cacheSnapshot)
     }
 
     nonisolated private static func buildZeroLatencyItems(from assets: [PHAsset], cache: [String: PhotoAnalysisCacheEntry]) -> [PhotoItem] {

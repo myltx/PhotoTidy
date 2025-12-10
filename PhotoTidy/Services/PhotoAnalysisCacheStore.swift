@@ -4,6 +4,8 @@ import Foundation
 final class PhotoAnalysisCacheStore {
     private struct CachePayload: Codable {
         let version: Int
+        let generatedAt: Date?
+        let assetCount: Int?
         let entries: [PhotoAnalysisCacheEntry]
     }
 
@@ -17,9 +19,11 @@ final class PhotoAnalysisCacheStore {
     private let queue = DispatchQueue(label: "com.phototidy.analysis-cache")
     private let fileURL: URL
     private var entries: [String: PhotoAnalysisCacheEntry] = [:]
+    private var lastGeneratedAt: Date?
+    private var lastAssetCount: Int?
 
     init(fileName: String = "PhotoAnalysisCache.json") {
-        let urls = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
+        let urls = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)
         let directory = urls.first ?? FileManager.default.temporaryDirectory
         self.fileURL = directory.appendingPathComponent(fileName)
 
@@ -76,17 +80,28 @@ final class PhotoAnalysisCacheStore {
             entries = payload.entries.reduce(into: [String: PhotoAnalysisCacheEntry]()) { partialResult, entry in
                 partialResult[entry.localIdentifier] = entry
             }
+            lastGeneratedAt = payload.generatedAt
+            lastAssetCount = payload.assetCount ?? payload.entries.count
         } catch {
             entries = [:]
+            lastGeneratedAt = nil
+            lastAssetCount = nil
         }
     }
 
-    private func persistLocked() {
-        let payload = CachePayload(version: PhotoAnalysisCacheEntry.currentVersion, entries: Array(entries.values))
+    private func persistLocked(assetCount: Int? = nil) {
+        let payload = CachePayload(
+            version: PhotoAnalysisCacheEntry.currentVersion,
+            generatedAt: Date(),
+            assetCount: assetCount ?? entries.count,
+            entries: Array(entries.values)
+        )
         guard let data = try? encoder.encode(payload) else { return }
         do {
             try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: fileURL, options: .atomic)
+            lastGeneratedAt = payload.generatedAt
+            lastAssetCount = payload.assetCount
         } catch {
             // 忽略写入失败，等待下次再尝试
         }

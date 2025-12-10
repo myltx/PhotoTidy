@@ -10,8 +10,10 @@ struct SimilarComparisonView: View {
     @State private var selections: [Int: Set<String>] = [:]
     @State private var previewItem: PhotoItem?
     @State private var pendingRecomputeWorkItem: DispatchWorkItem?
+    @State private var unresolvedAssetIds: Set<String> = []
     @State private var batchSize: Int = 10
     @State private var nextGroupIndex: Int = 0
+    @State private var cachedItems: [String: PhotoItem] = [:]
 
     private let chipFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -61,13 +63,15 @@ struct SimilarComparisonView: View {
                 }
             }
         }
-        .onAppear(perform: recomputeGroups)
+        .onAppear {
+            initializeCachedItems()
+            recomputeGroups()
+        }
         .onChange(of: viewModel.similarGroupSnapshots) { _ in
             scheduleRecomputeGroups()
         }
-        .onChange(of: viewModel.items) { _ in
-            guard shouldRefreshForItems() else { return }
-            scheduleRecomputeGroups(after: 0.2)
+        .onChange(of: viewModel.items) { newItems in
+            updateCachedItems(with: newItems)
         }
         .fullScreenCover(item: $previewItem) { item in
             FullScreenPreviewView(item: item, viewModel: viewModel)
@@ -264,6 +268,7 @@ struct SimilarComparisonView: View {
             displayedGroups.removeAll { $0.id == group.id }
             allGroups.removeAll { $0.id == group.id }
             selections.removeValue(forKey: group.id)
+            unresolvedAssetIds.subtract(group.items.map(\.id))
         }
         viewModel.clearSimilarGroupMarkers(for: group.items.map(\.id))
         viewModel.removeSimilarGroupSnapshot(withId: group.id)
@@ -285,15 +290,24 @@ struct SimilarComparisonView: View {
             selections = [:]
             displayedGroups = []
             nextGroupIndex = 0
+            unresolvedAssetIds = []
             return
         }
 
-        let itemsLookup = Dictionary(uniqueKeysWithValues: viewModel.items.map { ($0.id, $0) })
+        let itemsLookup = cachedItems
         var nextGroups: [SimilarGroup] = []
         var nextSelections: [Int: Set<String>] = [:]
+        var unresolved: Set<String> = []
 
         for snapshot in snapshots {
-            let resolvedItems = snapshot.assetIds.compactMap { itemsLookup[$0] }
+            let resolvedItems = snapshot.assetIds.compactMap { id -> PhotoItem? in
+                if let item = itemsLookup[id] {
+                    return item
+                } else {
+                    unresolved.insert(id)
+                    return nil
+                }
+            }
             guard resolvedItems.count >= 2 else { continue }
             let resolvedRecommendedIndex: Int
             if let match = resolvedItems.firstIndex(where: { $0.id == snapshot.recommendedAssetId }) {
@@ -322,7 +336,9 @@ struct SimilarComparisonView: View {
         allGroups = nextGroups
         selections = nextSelections
         nextGroupIndex = 0
+        unresolvedAssetIds = unresolved
         displayInitialBatch()
+        resolveMissingAssets(Array(unresolved))
     }
 
     private func scheduleRecomputeGroups(after delay: TimeInterval = 0.35) {
@@ -378,16 +394,39 @@ struct SimilarComparisonView: View {
         }
         .padding(.vertical, 12)
     }
+    private func initializeCachedItems() {
+        cachedItems = Dictionary(uniqueKeysWithValues: viewModel.items.map { ($0.id, $0) })
+    }
 
-    private func shouldRefreshForItems() -> Bool {
-        guard !viewModel.similarGroupSnapshots.isEmpty else { return false }
-        let neededIds = Set(viewModel.similarGroupSnapshots.flatMap(\.assetIds))
-        guard !neededIds.isEmpty else { return false }
-        let available = Set(viewModel.items.map(\.id))
-        if !neededIds.isSubset(of: available) {
-            return true
+    private func updateCachedItems(with items: [PhotoItem]) {
+        guard !items.isEmpty else { return }
+        var updated = cachedItems
+        for item in items {
+            updated[item.id] = item
         }
-        return displayedGroups.isEmpty && !neededIds.isEmpty
+        cachedItems = updated
+        guard !unresolvedAssetIds.isEmpty else { return }
+        let remaining = unresolvedAssetIds.filter { cachedItems[$0] == nil }
+        if remaining.count != unresolvedAssetIds.count {
+            unresolvedAssetIds = Set(remaining)
+            scheduleRecomputeGroups(after: 0.1)
+        }
+    }
+
+    private func resolveMissingAssets(_ identifiers: [String]) {
+        let pending = identifiers.filter { cachedItems[$0] == nil }
+        guard !pending.isEmpty else { return }
+        Task {
+            let fetched = await viewModel.loadPhotoItems(for: pending)
+            await MainActor.run {
+                guard !fetched.isEmpty else { return }
+                for item in fetched {
+                    cachedItems[item.id] = item
+                }
+                unresolvedAssetIds.subtract(fetched.map(\.id))
+                scheduleRecomputeGroups(after: 0.1)
+            }
+        }
     }
 }
 
