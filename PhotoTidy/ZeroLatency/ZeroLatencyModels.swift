@@ -2,6 +2,8 @@ import Foundation
 import Photos
 
 // MARK: - Cache Schema Models
+// 说明：ZeroLatency 的旧缓存 JSON schema（v1）仍需要这些模型做惰性迁移
+// （见 PhotoAnalysisRepository.migrateFromZeroLatencyIfNeeded）。当前不再在 ZeroLatency 内部写盘。
 
 struct RecentPreviewItem: Codable, Identifiable, Equatable {
     let id: String
