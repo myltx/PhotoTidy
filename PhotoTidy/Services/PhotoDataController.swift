@@ -16,6 +16,7 @@ final class PhotoDataController: NSObject {
     }
 
     var onSnapshotChange: ((Snapshot) -> Void)?
+    var onAnalysisStateChange: ((AnalysisState) -> Void)?
 
     func currentSnapshot() -> Snapshot {
         Snapshot(
@@ -405,6 +406,7 @@ final class PhotoDataController: NSObject {
     private func startAnalysisWorkerIfNeeded() {
         guard !analysisIsRunning else { return }
         analysisIsRunning = true
+        onAnalysisStateChange?(.analyzing(progress: "准备中"))
         analysisWorkerTask = Task.detached(priority: .utility) { [weak self] in
             await self?.runAnalysisWorker()
         }
@@ -426,6 +428,9 @@ final class PhotoDataController: NSObject {
         while true {
             let batchIds = await analysisScheduler.nextBatch(limit: analysisBatchSize)
             if batchIds.isEmpty { break }
+            await MainActor.run { [weak self] in
+                self?.onAnalysisStateChange?(.analyzing(progress: "\(batchIds.count) 张"))
+            }
 
             let itemsById = await MainActor.run { [weak self] in
                 Dictionary(uniqueKeysWithValues: (self?.items ?? []).map { ($0.id, $0) })
@@ -514,6 +519,7 @@ final class PhotoDataController: NSObject {
         await MainActor.run { [weak self] in
             guard let self else { return }
             self.analysisIsRunning = false
+            self.onAnalysisStateChange?(.idle)
         }
 
         let pending = await analysisScheduler.hasPending()

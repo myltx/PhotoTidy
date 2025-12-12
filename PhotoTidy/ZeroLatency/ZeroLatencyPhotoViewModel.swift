@@ -12,35 +12,33 @@ final class ZeroLatencyPhotoViewModel: ObservableObject {
 
     let imageCache = ImageCache()
 
-    private let cacheStore = ZeroLatencyCacheStore()
     private lazy var photoLoader = PhotoLoader(imageCache: imageCache)
-    private lazy var analysisManager = AnalysisManager(cacheStore: cacheStore)
     private let permissionsManager = PermissionsManager()
     private let libraryObserver = PhotoLibraryObserver()
+    private let analysisCache = PhotoAnalysisRepository()
+    private let userStateRepo = PhotoUserStateRepository()
+    private lazy var dataController = PhotoDataController(
+        analysisCache: analysisCache,
+        userStateRepo: userStateRepo
+    )
 
     private var cancellables: Set<AnyCancellable> = []
-    private var snapshotObserver: NSObjectProtocol?
-    private var hasSeededRecentPreview = false
+    private var totalAssetCount: Int = 0
+    private var lastDashboardUpdatedAt: Date = .distantPast
+    private var needsBootstrapFlag: Bool = true
+    private var wasAnalyzing = false
 
     init() {
         authorizationStatus = permissionsManager.status
         photoLoader.delegate = self
+        needsBootstrapFlag = analysisCache.snapshot().isEmpty
         setupBindings()
-        observeCache()
-        Task {
-            await loadInitialSnapshot()
-        }
+        rebuildDashboardSnapshot(using: dataController.currentSnapshot())
     }
 
     deinit {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            if let snapshotObserver = self.snapshotObserver {
-                NotificationCenter.default.removeObserver(snapshotObserver)
-            }
-            self.libraryObserver.stopObserving()
-            self.photoLoader.stop()
-        }
+        libraryObserver.stopObserving()
+        photoLoader.stop()
     }
 
     func requestAuthorization() {
@@ -66,9 +64,8 @@ final class ZeroLatencyPhotoViewModel: ObservableObject {
     }
 
     func triggerAnalysisForSimilarFeature() {
-        Task {
-            await analysisManager.enqueue(assets: gridItems.map { $0.asset })
-        }
+        let candidates = dataController.currentSnapshot().items
+        dataController.elevateAnalysisPriority(for: candidates)
     }
 
     private func setupBindings() {
@@ -88,105 +85,100 @@ final class ZeroLatencyPhotoViewModel: ObservableObject {
             .sink { [weak self] items in
                 guard let self else { return }
                 self.gridItems = items
-                self.seedRecentPreviewIfNeeded(with: items)
+                self.rebuildDashboardSnapshot(using: self.dataController.currentSnapshot())
             }
             .store(in: &cancellables)
 
-        analysisManager.onStateChange = { [weak self] state in
-            Task { @MainActor in
-                self?.analysisState = state
-            }
-        }
-    }
-
-    private func observeCache() {
-        snapshotObserver = NotificationCenter.default.addObserver(
-            forName: .photoAnalysisCacheDidChange,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let snapshot = notification.userInfo?["snapshot"] as? DashboardSnapshot else { return }
-            self?.dashboardSnapshot = snapshot
-        }
-    }
-
-    private func loadInitialSnapshot() async {
-        let snapshot = await cacheStore.currentSnapshot()
-        await MainActor.run {
-            dashboardSnapshot = snapshot
-        }
-    }
-
-    private func seedRecentPreviewIfNeeded(with items: [AssetItem]) {
-        guard !hasSeededRecentPreview, !items.isEmpty else { return }
-        hasSeededRecentPreview = true
-        let previews = items.prefix(24).map {
-            RecentPreviewItem(id: $0.id, thumb: nil, createdAt: $0.creationDate)
-        }
-        Task {
-            await cacheStore.updateDashboard(recentPreview: previews)
-        }
-    }
-
-    private func handleLibraryChange() {
-        hasSeededRecentPreview = false
-        photoLoader.reloadLibrary()
-    }
-
-    nonisolated private static func collectStats(from fetchResult: PHFetchResult<PHAsset>, previewLimit: Int = 24) -> (Int, [MonthlyCount], [RecentPreviewItem]) {
-        let total = fetchResult.count
-        var monthlyDictionary: [String: (Int, Int, Int)] = [:]
-        var previews: [RecentPreviewItem] = []
-        let calendar = Calendar.current
-
-        fetchResult.enumerateObjects { asset, index, stop in
-            let date = asset.creationDate ?? asset.modificationDate ?? Date()
-            let comps = calendar.dateComponents([.year, .month], from: date)
-            if let year = comps.year, let month = comps.month {
-                let key = "\(year)-\(month)"
-                let existing = monthlyDictionary[key] ?? (year, month, 0)
-                monthlyDictionary[key] = (year, month, existing.2 + 1)
-            }
-            if index < previewLimit {
-                previews.append(RecentPreviewItem(id: asset.localIdentifier, thumb: nil, createdAt: date))
-            }
+        dataController.onSnapshotChange = { [weak self] snapshot in
+            guard let self else { return }
+            self.rebuildDashboardSnapshot(using: snapshot)
         }
 
-        let monthly = monthlyDictionary.values
-            .map { MonthlyCount(year: $0.0, month: $0.1, count: $0.2) }
-            .sorted { lhs, rhs in
-                if lhs.year == rhs.year {
-                    return lhs.month > rhs.month
+        dataController.onAnalysisStateChange = { [weak self] state in
+            guard let self else { return }
+            self.analysisState = state
+            switch state {
+            case .analyzing:
+                self.wasAnalyzing = true
+            case .idle:
+                if self.wasAnalyzing {
+                    self.lastDashboardUpdatedAt = Date()
+                    self.wasAnalyzing = false
+                    self.rebuildDashboardSnapshot(using: self.dataController.currentSnapshot())
                 }
-                return lhs.year > rhs.year
             }
+        }
+    }
 
-        return (total, monthly, previews)
+    private func rebuildDashboardSnapshot(using snapshot: PhotoDataController.Snapshot) {
+        if needsBootstrapFlag,
+           snapshot.items.contains(where: { $0.blurScore != nil || $0.pHash != nil }) {
+            needsBootstrapFlag = false
+        }
+
+        let totalFromMonths = snapshot.monthAssetTotals.values.reduce(0, +)
+        let total = totalAssetCount > 0 ? totalAssetCount : (totalFromMonths > 0 ? totalFromMonths : snapshot.items.count)
+
+        let monthlyCounts: [MonthlyCount] = snapshot.monthAssetTotals.compactMap { key, count in
+            let parts = key.split(separator: "-")
+            guard parts.count == 2,
+                  let year = Int(parts[0]),
+                  let month = Int(parts[1]) else { return nil }
+            return MonthlyCount(year: year, month: month, count: count)
+        }
+        .sorted { lhs, rhs in
+            if lhs.year == rhs.year { return lhs.month > rhs.month }
+            return lhs.year > rhs.year
+        }
+
+        let recentPreview: [RecentPreviewItem] = snapshot.items.prefix(24).map {
+            RecentPreviewItem(id: $0.id, thumb: nil, createdAt: $0.creationDate ?? Date())
+        }
+
+        let topLargeFiles: [String] = snapshot.items
+            .sorted { $0.fileSize > $1.fileSize }
+            .prefix(20)
+            .map(\.id)
+
+        let lastUpdated = lastDashboardUpdatedAt
+        let meta = AnalysisMeta(lastSimilarityRun: nil, version: "1.0.0")
+
+        dashboardSnapshot = DashboardSnapshot(
+            schemaVersion: 1,
+            totalCount: total,
+            recentPreview: recentPreview,
+            monthlyCounts: monthlyCounts,
+            topLargeFiles: topLargeFiles,
+            analysisMeta: meta,
+            lastUpdated: lastUpdated,
+            needsBootstrap: needsBootstrapFlag
+        )
     }
 }
 
 extension ZeroLatencyPhotoViewModel: PhotoLoaderDelegate {
     func photoLoader(_ loader: PhotoLoader, didUpdateFetchResult fetchResult: PHFetchResult<PHAsset>) {
         libraryObserver.startObserving(fetchResult: fetchResult)
-        libraryObserver.onChange = { [weak self] _ in
+        totalAssetCount = fetchResult.count
+
+        libraryObserver.onChange = { [weak self] details in
+            guard let self else { return }
             Task { @MainActor in
-                self?.handleLibraryChange()
+                guard details.hasIncrementalChanges, !self.gridItems.isEmpty else {
+                    self.dataController.resetPagingState()
+                    self.photoLoader.reloadLibrary()
+                    return
+                }
+                self.photoLoader.applyChangeDetails(details)
+                self.dataController.applyLibraryChange(details)
             }
         }
-        Task.detached(priority: .utility) { [weak self] in
-            let stats = ZeroLatencyPhotoViewModel.collectStats(from: fetchResult)
-            await self?.cacheStore.updateDashboard(
-                totalCount: stats.0,
-                monthlyCounts: stats.1,
-                recentPreview: stats.2,
-                topLargeFiles: nil
-            )
-        }
+
+        dataController.handleFetchResultUpdate(fetchResult)
+        rebuildDashboardSnapshot(using: dataController.currentSnapshot())
     }
 
     func photoLoader(_ loader: PhotoLoader, didLoadAssets assets: [PHAsset]) {
-        Task {
-            await analysisManager.enqueue(assets: assets)
-        }
+        dataController.handleLoadedAssets(assets)
     }
 }
