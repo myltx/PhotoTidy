@@ -156,11 +156,85 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     
     func photoLibraryDidChange(_ changeInstance: PHChange) {
         guard let fetchResult = assetsFetchResult,
-              changeInstance.changeDetails(for: fetchResult) != nil else { return }
+              let details = changeInstance.changeDetails(for: fetchResult) else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.resetPagingState()
-            self.pagingLoader.reloadLibrary()
+
+            // 如果不是增量变更（或当前尚未加载任何 items），回退到旧逻辑以保证正确性。
+            guard details.hasIncrementalChanges, !self.items.isEmpty else {
+                self.resetPagingState()
+                self.pagingLoader.reloadLibrary()
+                return
+            }
+
+            // 1) 让分页加载器增量更新 fetchResult / 预热窗口等。
+            self.pagingLoader.applyChangeDetails(details)
+
+            // 2) 根据新的 fetchResult 顺序重建当前已加载前缀，保持 UI 顺序正确。
+            let afterChanges = details.fetchResultAfterChanges
+            let loadedCount = self.items.count
+            let prefixCount = min(loadedCount, afterChanges.count)
+            if prefixCount == 0 {
+                self.items = []
+                self.loadedAssetIdentifiers.removeAll()
+                self.refreshSession()
+                return
+            }
+
+            let cacheEntries = self.analysisCache.snapshot()
+            let existingMap = Dictionary(uniqueKeysWithValues: self.items.map { ($0.id, $0) })
+            var newItems: [PhotoItem] = []
+            newItems.reserveCapacity(prefixCount)
+
+            for index in 0..<prefixCount {
+                let asset = afterChanges.object(at: index)
+                let id = asset.localIdentifier
+                let estimatedSize = self.assetResourceSize(for: asset)
+
+                if let existing = existingMap[id] {
+                    // 用新的 PHAsset 重新构造基础信息，保留用户状态与可复用的分析结果。
+                    var item = self.photoItem(for: asset, estimatedSize: estimatedSize)
+                    item.markedForDeletion = existing.markedForDeletion
+
+                    if estimatedSize == existing.fileSize {
+                        item.pHash = existing.pHash
+                        item.blurScore = existing.blurScore
+                        item.exposureIsBad = existing.exposureIsBad
+                        item.isBlurredOrShaky = existing.isBlurredOrShaky
+                        item.isDocumentLike = existing.isDocumentLike
+                        item.isTextImage = existing.isTextImage
+                        item.isLargeFile = existing.isLargeFile
+                        item.similarGroupId = existing.similarGroupId
+                        item.similarityKind = existing.similarityKind
+                        item.assetType = existing.assetType
+                    }
+
+                    if let entry = cacheEntries[id],
+                       entry.version == PhotoAnalysisCacheEntry.currentVersion,
+                       entry.fileSize == estimatedSize {
+                        self.applyCachedEntry(entry, to: &item)
+                    }
+
+                    newItems.append(item)
+                } else {
+                    // 新插入的资源：按 ingestAssets 逻辑创建，并尝试命中分析缓存。
+                    var item = self.photoItem(for: asset, estimatedSize: estimatedSize)
+                    if let entry = cacheEntries[id],
+                       entry.version == PhotoAnalysisCacheEntry.currentVersion,
+                       entry.fileSize == item.fileSize {
+                        self.applyCachedEntry(entry, to: &item)
+                    }
+                    var tmp = [item]
+                    self.restoreSelectionStates(in: &tmp)
+                    newItems.append(tmp[0])
+                }
+            }
+
+            self.items = newItems
+            self.loadedAssetIdentifiers = Set(newItems.map(\.id))
+            self.revalidateSimilarGroups()
+            self.refreshSession()
+            self.scheduleBackgroundAnalysisIfNeeded()
         }
     }
     

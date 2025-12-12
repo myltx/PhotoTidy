@@ -28,6 +28,9 @@ final class PhotoLoader: ObservableObject {
     private var isLoadingPage = false
     private var backgroundPrefetchTask: Task<Void, Never>?
     private var cachingRange: Range<Int> = 0..<0
+    // 每次 fetchResult 结构发生变化（reload / applyChangeDetails）都会递增，
+    // 使在途的分页任务失效，避免旧结果污染新顺序。
+    private var loadGeneration: Int = 0
 
     private let firstPageSize = 100
     private let pageSize = 200
@@ -59,6 +62,7 @@ final class PhotoLoader: ObservableObject {
     }
 
     func reloadLibrary() {
+        loadGeneration += 1
         stop()
         items = []
         fetchResult = nil
@@ -105,14 +109,16 @@ final class PhotoLoader: ObservableObject {
             return
         }
         isLoadingPage = true
-        Task.detached(priority: trigger == .background ? .utility : .userInitiated) { [weak self, fetchResult] in
+        let generation = loadGeneration
+        Task.detached(priority: trigger == .background ? .utility : .userInitiated) { [weak self, fetchResult, generation] in
             let items = PhotoLoader.makeItems(fetchResult: fetchResult, range: range)
-            await self?.handleLoadedItems(items, range: range, trigger: trigger)
+            await self?.handleLoadedItems(items, range: range, trigger: trigger, generation: generation)
         }
     }
 
-    private func handleLoadedItems(_ newItems: [AssetItem], range: Range<Int>, trigger: LoadTrigger) {
+    private func handleLoadedItems(_ newItems: [AssetItem], range: Range<Int>, trigger: LoadTrigger, generation: Int) {
         guard !Task.isCancelled else { return }
+        guard generation == loadGeneration else { return }
         items.append(contentsOf: newItems)
         currentUpperBound = max(currentUpperBound, range.upperBound)
         delegate?.photoLoader(self, didLoadAssets: newItems.map { $0.asset })
@@ -120,6 +126,32 @@ final class PhotoLoader: ObservableObject {
         if trigger == .initial {
             isBootstrapping = false
         }
+    }
+
+    /// PhotoKit 变更增量应用：更新 fetchResult 与已加载的 items，
+    /// 不做全量 reset，保持分页状态尽量稳定。
+    func applyChangeDetails(_ details: PHFetchResultChangeDetails<PHAsset>) {
+        loadGeneration += 1
+        let afterChanges = details.fetchResultAfterChanges
+        fetchResult = afterChanges
+
+        // 重新构建已加载范围（0..<currentUpperBound），确保顺序与新 fetchResult 一致。
+        let newUpperBound = min(currentUpperBound, afterChanges.count)
+        if newUpperBound > 0 {
+            items = PhotoLoader.makeItems(fetchResult: afterChanges, range: 0..<newUpperBound)
+        } else {
+            items = []
+        }
+        currentUpperBound = newUpperBound
+
+        // 预热窗口继续沿用，但需要用新 fetchResult 重新绑定。
+        if !cachingRange.isEmpty {
+            let clamped = max(0, cachingRange.lowerBound)..<min(afterChanges.count, cachingRange.upperBound)
+            cachingRange = clamped
+            imageCache.updateCaching(fetchResult: afterChanges, newRange: clamped)
+        }
+
+        delegate?.photoLoader(self, didUpdateFetchResult: afterChanges)
     }
 
     private func scheduleBackgroundPrefetchIfNeeded() {
