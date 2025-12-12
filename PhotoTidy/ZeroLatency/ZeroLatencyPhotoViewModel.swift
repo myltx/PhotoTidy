@@ -15,13 +15,10 @@ final class ZeroLatencyPhotoViewModel: ObservableObject {
     private lazy var photoLoader = PhotoLoader(imageCache: imageCache)
     private let permissionsManager = PermissionsManager()
     private let libraryObserver = PhotoLibraryObserver()
-    private let analysisCache = PhotoAnalysisRepository()
-    private let userStateRepo = PhotoUserStateRepository()
-    private let metaStore = AnalysisDashboardMetaStore()
-    private lazy var dataController = PhotoDataController(
-        analysisCache: analysisCache,
-        userStateRepo: userStateRepo
-    )
+    private let analysisCache: PhotoAnalysisRepository
+    private let userStateRepo: PhotoUserStateRepository
+    private let metaStore: AnalysisDashboardMetaStore
+    private let dataController: PhotoDataController
 
     private var cancellables: Set<AnyCancellable> = []
     private var totalAssetCount: Int = 0
@@ -31,6 +28,11 @@ final class ZeroLatencyPhotoViewModel: ObservableObject {
     private var wasAnalyzing = false
 
     init() {
+        let container = PhotoDataContainer.shared
+        self.analysisCache = container.analysisRepository
+        self.userStateRepo = container.userStateRepository
+        self.metaStore = container.dashboardMetaStore
+        self.dataController = container.dataController
         authorizationStatus = permissionsManager.status
         photoLoader.delegate = self
         needsBootstrapFlag = analysisCache.snapshot().isEmpty
@@ -45,8 +47,16 @@ final class ZeroLatencyPhotoViewModel: ObservableObject {
     }
 
     deinit {
-        libraryObserver.stopObserving()
-        photoLoader.stop()
+        scheduleTeardown()
+    }
+
+    // Swift 6 中 deinit 默认非隔离，避免直接访问 MainActor 属性。
+    nonisolated private func scheduleTeardown() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.libraryObserver.stopObserving()
+            self.photoLoader.stop()
+        }
     }
 
     func requestAuthorization() {
@@ -97,12 +107,15 @@ final class ZeroLatencyPhotoViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        let previousSnapshotHandler = dataController.onSnapshotChange
         dataController.onSnapshotChange = { [weak self] snapshot in
-            guard let self else { return }
-            self.rebuildDashboardSnapshot(using: snapshot)
+            previousSnapshotHandler?(snapshot)
+            self?.rebuildDashboardSnapshot(using: snapshot)
         }
 
+        let previousStateHandler = dataController.onAnalysisStateChange
         dataController.onAnalysisStateChange = { [weak self] state in
+            previousStateHandler?(state)
             guard let self else { return }
             self.analysisState = state
             switch state {

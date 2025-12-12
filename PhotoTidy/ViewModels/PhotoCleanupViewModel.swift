@@ -68,10 +68,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     private var hasScheduledInitialAssetLoad = false
 
     // Data controller（加载/分析/持久化）
-    private lazy var dataController = PhotoDataController(
-        analysisCache: analysisCache,
-        userStateRepo: userStateRepo
-    )
+    private let dataController: PhotoDataController
     private var lastSnapshotItemIds: Set<String> = []
 
     // MARK: - Computed Properties
@@ -121,16 +118,17 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         skippedPhotoStore: SkippedPhotoStore = SkippedPhotoStore(),
         analysisCache: PhotoAnalysisCacheStore = PhotoAnalysisCacheStore()
     ) {
-        self.analysisCache = PhotoAnalysisRepository(store: analysisCache)
-        self.userStateRepo = PhotoUserStateRepository(
-            timeMachineProgressStore: timeMachineProgressStore,
-            smartCleanupProgressStore: smartCleanupProgressStore,
-            skippedPhotoStore: skippedPhotoStore
-        )
+        // 使用全局数据容器，保证与 ZeroLatency 共享同一数据层
+        let container = PhotoDataContainer.shared
+        self.analysisCache = container.analysisRepository
+        self.userStateRepo = container.userStateRepository
+        self.dataController = container.dataController
         super.init()
 
         // 绑定数据控制器快照
+        let previousSnapshotHandler = dataController.onSnapshotChange
         dataController.onSnapshotChange = { [weak self] snapshot in
+            previousSnapshotHandler?(snapshot)
             self?.applySnapshot(snapshot)
         }
         applySnapshot(dataController.currentSnapshot())

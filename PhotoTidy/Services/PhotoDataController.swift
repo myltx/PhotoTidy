@@ -31,7 +31,7 @@ final class PhotoDataController: NSObject {
     private let analysisCache: PhotoAnalysisRepository
     private let userStateRepo: PhotoUserStateRepository
     private let analysisScheduler: AnalysisScheduler
-    private let metaStore = AnalysisDashboardMetaStore()
+    private let metaStore: AnalysisDashboardMetaStore
     private let analysisBatchSize = 50
     private let analysisFlushCount = 100
     private let analysisFlushInterval: TimeInterval = 1.5
@@ -51,10 +51,12 @@ final class PhotoDataController: NSObject {
     init(
         analysisCache: PhotoAnalysisRepository,
         userStateRepo: PhotoUserStateRepository,
+        metaStore: AnalysisDashboardMetaStore = AnalysisDashboardMetaStore(),
         analysisScheduler: AnalysisScheduler = AnalysisScheduler()
     ) {
         self.analysisCache = analysisCache
         self.userStateRepo = userStateRepo
+        self.metaStore = metaStore
         self.analysisScheduler = analysisScheduler
         self.smartCleanupProgress = userStateRepo.loadSmartProgress()
         self.skippedPhotoRecords = userStateRepo.skippedRecords()
