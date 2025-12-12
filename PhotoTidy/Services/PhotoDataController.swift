@@ -31,6 +31,7 @@ final class PhotoDataController: NSObject {
     private let analysisCache: PhotoAnalysisRepository
     private let userStateRepo: PhotoUserStateRepository
     private let analysisScheduler: AnalysisScheduler
+    private let metaStore = AnalysisDashboardMetaStore()
     private let analysisBatchSize = 50
     private let analysisFlushCount = 100
     private let analysisFlushInterval: TimeInterval = 1.5
@@ -581,6 +582,7 @@ final class PhotoDataController: NSObject {
         processSimilarGroups(analyzedItems: &analyzedItems, pHashes: pHashes)
         let fullEntries = buildCacheEntries(from: analyzedItems, featurePrints: featurePrints, pHashes: pHashes)
         analysisCache.update(entries: fullEntries)
+        await metaStore.update(lastUpdated: Date(), lastSimilarityRun: Date())
 
         await MainActor.run { [weak self] in
             guard let self else { return }

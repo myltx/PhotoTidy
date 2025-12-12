@@ -17,6 +17,7 @@ final class ZeroLatencyPhotoViewModel: ObservableObject {
     private let libraryObserver = PhotoLibraryObserver()
     private let analysisCache = PhotoAnalysisRepository()
     private let userStateRepo = PhotoUserStateRepository()
+    private let metaStore = AnalysisDashboardMetaStore()
     private lazy var dataController = PhotoDataController(
         analysisCache: analysisCache,
         userStateRepo: userStateRepo
@@ -25,6 +26,7 @@ final class ZeroLatencyPhotoViewModel: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private var totalAssetCount: Int = 0
     private var lastDashboardUpdatedAt: Date = .distantPast
+    private var lastSimilarityRun: Date?
     private var needsBootstrapFlag: Bool = true
     private var wasAnalyzing = false
 
@@ -33,7 +35,13 @@ final class ZeroLatencyPhotoViewModel: ObservableObject {
         photoLoader.delegate = self
         needsBootstrapFlag = analysisCache.snapshot().isEmpty
         setupBindings()
-        rebuildDashboardSnapshot(using: dataController.currentSnapshot())
+        Task { [weak self] in
+            guard let self else { return }
+            let meta = await self.metaStore.load()
+            self.lastDashboardUpdatedAt = meta.lastUpdated
+            self.lastSimilarityRun = meta.lastSimilarityRun
+            self.rebuildDashboardSnapshot(using: self.dataController.currentSnapshot())
+        }
     }
 
     deinit {
@@ -102,9 +110,14 @@ final class ZeroLatencyPhotoViewModel: ObservableObject {
                 self.wasAnalyzing = true
             case .idle:
                 if self.wasAnalyzing {
-                    self.lastDashboardUpdatedAt = Date()
                     self.wasAnalyzing = false
-                    self.rebuildDashboardSnapshot(using: self.dataController.currentSnapshot())
+                    Task { [weak self] in
+                        guard let self else { return }
+                        let meta = await self.metaStore.load()
+                        self.lastDashboardUpdatedAt = meta.lastUpdated
+                        self.lastSimilarityRun = meta.lastSimilarityRun
+                        self.rebuildDashboardSnapshot(using: self.dataController.currentSnapshot())
+                    }
                 }
             }
         }
@@ -141,7 +154,7 @@ final class ZeroLatencyPhotoViewModel: ObservableObject {
             .map(\.id)
 
         let lastUpdated = lastDashboardUpdatedAt
-        let meta = AnalysisMeta(lastSimilarityRun: nil, version: "1.0.0")
+        let meta = AnalysisMeta(lastSimilarityRun: lastSimilarityRun, version: "1.0.0")
 
         dashboardSnapshot = DashboardSnapshot(
             schemaVersion: 1,
