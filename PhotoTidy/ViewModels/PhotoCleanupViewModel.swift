@@ -1,7 +1,6 @@
 import SwiftUI
 import Combine
 import Photos
-import Vision
 
 final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
     // MARK: - Properties
@@ -44,10 +43,8 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
 
     // Services
     let imageManager = PHCachingImageManager()
-    private let userStateRepo: PhotoUserStateRepository
     @Published private(set) var smartCleanupProgress: SmartCleanupProgress?
     @Published private(set) var skippedPhotoRecords: [SkippedPhotoRecord] = []
-    private let analysisCache: PhotoAnalysisRepository
     private let queryService = PhotoQueryService()
     private var assetsFetchResult: PHFetchResult<PHAsset>?
     private var cancellable: AnyCancellable?
@@ -57,9 +54,7 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         loader.delegate = self
         return loader
     }()
-    private var loadedAssetIdentifiers: Set<String> = []
     private var hasStartedPagingLoader = false
-    private var hasTriggeredBackgroundAnalysis = false
     private var hasInitializedSession = false
     private var sessionItemIds: Set<String> = []
     private var selectedAlbumAssetIds: Set<String>?
@@ -119,9 +114,11 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         analysisCache: PhotoAnalysisCacheStore = PhotoAnalysisCacheStore()
     ) {
         // 使用全局数据容器，保证与 ZeroLatency 共享同一数据层
+        _ = timeMachineProgressStore
+        _ = smartCleanupProgressStore
+        _ = skippedPhotoStore
+        _ = analysisCache
         let container = PhotoDataContainer.shared
-        self.analysisCache = container.analysisRepository
-        self.userStateRepo = container.userStateRepository
         self.dataController = container.dataController
         super.init()
 
@@ -393,8 +390,6 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     }
 
     private func resetPagingState() {
-        loadedAssetIdentifiers.removeAll()
-        hasTriggeredBackgroundAnalysis = false
         hasInitializedSession = false
         sessionItemIds.removeAll()
         items = []
@@ -431,42 +426,6 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         }
     }
 
-    private func ingestAssets(_ assets: [PHAsset]) {
-        guard !assets.isEmpty else { return }
-        let cacheEntries = analysisCache.snapshot()
-        var incoming: [PhotoItem] = []
-
-        for asset in assets {
-            let id = asset.localIdentifier
-            if loadedAssetIdentifiers.contains(id) { continue }
-            loadedAssetIdentifiers.insert(id)
-            let estimatedSize = assetResourceSize(for: asset)
-            var item = photoItem(for: asset, estimatedSize: estimatedSize)
-            if let entry = cacheEntries[id],
-               entry.version == PhotoAnalysisCacheEntry.currentVersion,
-               entry.fileSize == item.fileSize {
-                applyCachedEntry(entry, to: &item)
-            }
-            incoming.append(item)
-        }
-
-        guard !incoming.isEmpty else { return }
-        restoreSelectionStates(in: &incoming)
-        items.append(contentsOf: incoming)
-        if isLoading {
-            isLoading = false
-        }
-        if !hasInitializedSession {
-            hasInitializedSession = true
-            updateSessionItems(for: currentFilter)
-        } else if !isShowingCleaner {
-            refreshSession()
-        } else if activeMonthContext == nil {
-            appendIncomingToSession(newItems: incoming)
-        }
-        scheduleBackgroundAnalysisIfNeeded()
-    }
-
     private func appendIncomingToSession(newItems: [PhotoItem]) {
         guard !newItems.isEmpty else { return }
         let filtered = filteredItems(for: currentFilter, from: newItems)
@@ -474,27 +433,6 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         guard !filtered.isEmpty else { return }
         sessionItems.append(contentsOf: filtered)
         filtered.forEach { sessionItemIds.insert($0.id) }
-    }
-
-    private func applyCachedEntry(_ entry: PhotoAnalysisCacheEntry, to item: inout PhotoItem) {
-        item.isScreenshot = entry.isScreenshot
-        item.isDocumentLike = entry.isDocumentLike
-        item.isTextImage = entry.isTextImage
-        item.blurScore = entry.blurScore
-        item.isBlurredOrShaky = entry.isBlurredOrShaky
-        item.exposureIsBad = entry.exposureIsBad
-        item.pHash = entry.pHash
-        item.similarGroupId = entry.similarityGroupId
-        if let kindRaw = entry.similarityKind {
-            item.similarityKind = SimilarityGroupKind(rawValue: kindRaw)
-        } else {
-            item.similarityKind = nil
-        }
-        item.isLargeFile = item.fileSize > 15 * 1024 * 1024
-    }
-
-    private func scheduleBackgroundAnalysisIfNeeded() {
-        // 分析调度已下沉到 dataController；此处保留以兼容旧调用路径。
     }
 
     private func elevateAnalysisPriority(for candidates: [PhotoItem]) {
@@ -506,70 +444,6 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         dataController.elevateAnalysisPriority(for: visibles)
     }
 
-    private func processSimilarGroups(analyzedItems: inout [PhotoItem], featurePrints: [VNFeaturePrintObservation?], pHashes: [UInt64?]) {
-        let total = analyzedItems.count
-        guard total > 1 else { return }
-        let analysisService = ImageAnalysisService.shared
-        let indices = Array(0..<total).sorted { lhs, rhs in
-            let d1 = analyzedItems[lhs].creationDate ?? .distantPast
-            let d2 = analyzedItems[rhs].creationDate ?? .distantPast
-            return d1 < d2
-        }
-
-        let timeWindow: TimeInterval = 3.0
-        var buckets: [[Int]] = []
-        var current: [Int] = []
-        var bucketStart: Date?
-
-        for idx in indices {
-            guard let date = analyzedItems[idx].creationDate else { continue }
-            if current.isEmpty {
-                current = [idx]
-                bucketStart = date
-            } else if let start = bucketStart, date.timeIntervalSince(start) <= timeWindow {
-                current.append(idx)
-            } else {
-                if current.count > 1 { buckets.append(current) }
-                current = [idx]
-                bucketStart = date
-            }
-        }
-        if current.count > 1 { buckets.append(current) }
-
-        var globalGroupId = 0
-        let pHashThreshold = 10
-
-        for bucket in buckets {
-            var used = Set<Int>()
-            for i in 0..<bucket.count {
-                let idxI = bucket[i]
-                if used.contains(idxI) { continue }
-                guard let h1 = pHashes[idxI] else { continue }
-
-                var group: [Int] = [idxI]
-                used.insert(idxI)
-
-                for j in (i + 1)..<bucket.count {
-                    let idxJ = bucket[j]
-                    if used.contains(idxJ) { continue }
-                    guard let h2 = pHashes[idxJ] else { continue }
-                    let distance = analysisService.hammingDistance(h1, h2)
-                    if distance < pHashThreshold {
-                        group.append(idxJ)
-                        used.insert(idxJ)
-                    }
-                }
-
-                if group.count > 1 {
-                    globalGroupId += 1
-                    for idx in group {
-                        analyzedItems[idx].similarGroupId = globalGroupId
-                        analyzedItems[idx].similarityKind = .similar
-                    }
-                }
-            }
-        }
-    }
 // MARK: - User Actions
 
     func moveToNext() {
@@ -686,54 +560,6 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
     func timeMachineProgress(year: Int, month: Int) -> TimeMachineMonthProgress? {
         timeMachineSnapshots[monthKey(year: year, month: month)]
     }
-    
-    func photoItem(for asset: PHAsset, estimatedSize: Int) -> PhotoItem {
-        if let existing = items.first(where: { $0.id == asset.localIdentifier }) {
-            return existing
-        }
-        
-        return PhotoItem(
-            id: asset.localIdentifier,
-            asset: asset,
-            pixelSize: CGSize(width: asset.pixelWidth, height: asset.pixelHeight),
-            fileSize: estimatedSize,
-            creationDate: asset.creationDate,
-            isVideo: asset.mediaType == .video,
-            isScreenshot: asset.mediaSubtypes.contains(.photoScreenshot),
-            pHash: nil,
-            blurScore: nil,
-            exposureIsBad: false,
-            isBlurredOrShaky: false,
-            isDocumentLike: false,
-            isTextImage: false,
-            isLargeFile: estimatedSize > 10 * 1024 * 1024,
-            similarGroupId: nil,
-            similarityKind: nil,
-            assetType: nil,
-            markedForDeletion: false
-        )
-    }
-
-    private func revalidateSimilarGroups() {
-        var groupCounts = [Int: Int]()
-        let similarItems = items.filter { $0.similarGroupId != nil }
-        for item in similarItems {
-            if let groupId = item.similarGroupId {
-                groupCounts[groupId, default: 0] += 1
-            }
-        }
-        
-        let orphanedGroupIds = groupCounts.filter { $1 < 2 }.map { $0.key }
-        guard !orphanedGroupIds.isEmpty else { return }
-        let orphanedSet = Set(orphanedGroupIds)
-        
-        for i in 0..<items.count {
-            if let groupId = items[i].similarGroupId, orphanedSet.contains(groupId) {
-                items[i].similarGroupId = nil
-                items[i].similarityKind = nil
-            }
-        }
-    }
 
     func performDeletion(completion: @escaping (Bool, Error?) -> Void) {
         let toDeleteItems = items.filter { $0.markedForDeletion }
@@ -792,81 +618,6 @@ final class PhotoCleanupViewModel: NSObject, ObservableObject, PHPhotoLibraryCha
         currentIndex = 0
         sessionItemIds = Set(sessionItems.map(\.id))
         elevateAnalysisPriority(for: sessionItems)
-    }
-
-    private func restoreSelectionStates(in items: inout [PhotoItem]) {
-        for index in items.indices {
-            guard
-                let comps = monthComponents(for: items[index])
-            else { continue }
-            let key = monthKey(year: comps.year, month: comps.month)
-            if let progress = timeMachineSnapshots[key],
-               progress.selectedPhotoIds.contains(items[index].id) {
-                items[index].markedForDeletion = true
-            }
-        }
-    }
-    
-    private func applyCachedAnalysis(to items: inout [PhotoItem]) {
-        let cacheEntries = analysisCache.snapshot()
-        for index in items.indices {
-            guard let entry = cacheEntries[items[index].id],
-                  entry.version == PhotoAnalysisCacheEntry.currentVersion,
-                  entry.fileSize == items[index].fileSize else {
-                continue
-            }
-            items[index].isScreenshot = entry.isScreenshot
-            items[index].isDocumentLike = entry.isDocumentLike
-            items[index].isTextImage = entry.isTextImage
-            items[index].blurScore = entry.blurScore
-            items[index].isBlurredOrShaky = entry.isBlurredOrShaky
-            items[index].exposureIsBad = entry.exposureIsBad
-            items[index].pHash = entry.pHash
-            items[index].similarGroupId = entry.similarityGroupId
-            if let kindRaw = entry.similarityKind {
-                items[index].similarityKind = SimilarityGroupKind(rawValue: kindRaw)
-            } else {
-                items[index].similarityKind = nil
-            }
-            items[index].isLargeFile = items[index].fileSize > 15 * 1024 * 1024
-        }
-    }
-    
-    private func buildCacheEntries(
-        from analyzedItems: [PhotoItem],
-        featurePrints: [VNFeaturePrintObservation?],
-        pHashes: [UInt64?]
-    ) -> [PhotoAnalysisCacheEntry] {
-        guard analyzedItems.count == featurePrints.count,
-              analyzedItems.count == pHashes.count else {
-            return []
-        }
-        return analyzedItems.enumerated().map { index, item in
-            PhotoAnalysisCacheEntry(
-                localIdentifier: item.id,
-                fileSize: item.fileSize,
-                isScreenshot: item.isScreenshot,
-                isDocumentLike: item.isDocumentLike,
-                isTextImage: item.isTextImage,
-                blurScore: item.blurScore,
-                isBlurredOrShaky: item.isBlurredOrShaky,
-                exposureIsBad: item.exposureIsBad,
-                pHash: pHashes[index],
-                featurePrintData: archiveFeaturePrint(featurePrints[index]),
-                similarityGroupId: item.similarGroupId,
-                similarityKind: item.similarityKind?.rawValue
-            )
-        }
-    }
-    
-    private func archiveFeaturePrint(_ observation: VNFeaturePrintObservation?) -> Data? {
-        guard let observation else { return nil }
-        return try? NSKeyedArchiver.archivedData(withRootObject: observation, requiringSecureCoding: true)
-    }
-    
-    private func unarchiveFeaturePrint(from data: Data?) -> VNFeaturePrintObservation? {
-        guard let data else { return nil }
-        return try? NSKeyedUnarchiver.unarchivedObject(ofClass: VNFeaturePrintObservation.self, from: data)
     }
     
     private func storeSmartCleanupProgress(_ progress: SmartCleanupProgress?) {
@@ -1190,27 +941,6 @@ extension PhotoCleanupViewModel: PhotoLoaderDelegate {
         options.deliveryMode = .mediumQualityFormat
         options.isNetworkAccessAllowed = true
         PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { _, _, _ in }
-    }
-
-    private func rebuildMonthAssetTotals(from fetchResult: PHFetchResult<PHAsset>) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self else { return }
-            var counts: [String: Int] = [:]
-            let calendar = Calendar.current
-            fetchResult.enumerateObjects { asset, _, _ in
-                guard let date = asset.creationDate ?? asset.modificationDate else { return }
-                let comps = calendar.dateComponents([.year, .month], from: date)
-                guard let year = comps.year, let month = comps.month else { return }
-                let key = "\(year)-\(month)"
-                counts[key, default: 0] += 1
-            }
-            DispatchQueue.main.async {
-                self.monthAssetTotals = counts
-                #if DEBUG
-                print("[MonthAssetTotals] totals=\(counts)")
-                #endif
-            }
-        }
     }
 
     private func prefetchMonthAssetsIfNeeded(year: Int, month: Int) {
